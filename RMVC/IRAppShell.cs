@@ -1,6 +1,7 @@
 ﻿using System.Threading.Tasks;
 
-namespace RMVC {
+namespace RMVC 
+{
     public interface IRAppShell 
     {
         void SetAppEnabled(bool doEnable);
