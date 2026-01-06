@@ -1,5 +1,7 @@
-﻿namespace RMVC {
-    public class RProgress {
+﻿namespace RMVC 
+{
+    public class RProgress 
+    {
         public int Percent { get; }
         public string Message { get; }
         public string Heading { get; }
@@ -9,8 +11,8 @@
             int percent
             , string message
             , string heading
-            , string id
-        ) {
+            , string id) 
+        {
             if (percent < 0) percent = 0;
             if (percent > 100) percent = 100;
             if (string.IsNullOrWhiteSpace(message)) message = string.Empty;
