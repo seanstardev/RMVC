@@ -22,7 +22,8 @@
         /// Required method for Designer support - do not modify 
         /// the contents of this method with the code editor.
         /// </summary>
-        private void InitializeComponent() {
+        private void InitializeComponent()
+        {
             progressBar = new ProgressBar();
             label1 = new Label();
             titleLabel = new Label();
@@ -76,10 +77,10 @@
             // 
             // percentLabel
             // 
-            percentLabel.Font = new Font("Segoe UI", 12F, FontStyle.Bold, GraphicsUnit.Point, 0);
-            percentLabel.Location = new Point(531, 21);
+            percentLabel.Font = new Font("Segoe UI", 9.75F, FontStyle.Bold, GraphicsUnit.Point, 0);
+            percentLabel.Location = new Point(531, 24);
             percentLabel.Name = "percentLabel";
-            percentLabel.Size = new Size(52, 23);
+            percentLabel.Size = new Size(52, 20);
             percentLabel.TabIndex = 5;
             percentLabel.Text = "100%";
             // 

@@ -3,7 +3,7 @@ using RMVCApp.Sample.Core.Shared;
 
 namespace RMVCApp.Forms {
     public partial class CounterView : UserControl, ICounterView {
-        public event Action<int> SetCounterEvt;
+        public event Action<int>? SetCounterEvt;
 
         public CounterView() {
             InitializeComponent();

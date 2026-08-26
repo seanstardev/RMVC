@@ -348,7 +348,7 @@ namespace RMVC
         }
 
         internal void HandleProgressChange(RProgress[] progress) 
-        {    
+        {
             if ((DateTime.Now - lastProgressUpdateTime).TotalMilliseconds < 100)
                 return;
             else

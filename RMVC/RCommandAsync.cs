@@ -12,10 +12,18 @@ namespace RMVC {
         private bool completeHandled = false;
         internal bool hasParent { get; private set; } = false;
 
+        private string? pendingTitle = null;
+        private double? pendingPercent = null;
+        private string? pendingMessage = null;
+
         internal async Task RunInternalAsync(RTracker rTracker) 
         {
             this.rTracker = rTracker;
-            rTracker.SetProgressTitle(GetTitle());
+
+            rTracker.SetProgressTitle(
+                pendingTitle ?? GetTitle());
+
+            ApplyPendingProgress();
 
             try 
             {
@@ -80,21 +88,53 @@ namespace RMVC {
             rTracker?.SetError(errorMessage);
             HandleThreadExit();
         }
+
+        protected void SetTitle(string title) 
+        {
+            if (string.IsNullOrWhiteSpace(title))
+                return;
+
+            if (rTracker != null) 
+            {
+                rTracker.SetProgressTitle(title);
+                return;
+            }
+
+            pendingTitle = title;
+        }
+
         protected void SetProgress(int parts, int total, string? message = null) 
         {
-            rTracker?.SetProgress(parts, total, message ?? string.Empty);
+            SetProgress(GetPercent(parts, total), message);
         }
+
         protected void SetProgress(double percent, string? message = null) 
         {
-            rTracker?.SetProgress(percent, message ?? string.Empty);
+            percent = RHelper.ClampPercent(percent);
+
+            if (rTracker != null) 
+            {
+                rTracker.SetProgress(percent, message ?? string.Empty);
+                return;
+            }
+
+            StorePendingProgress(percent, message);
         }
+
         protected void SetProgress(int percent, string? message = null) 
         {
-            rTracker?.SetProgress(percent, message ?? string.Empty);
+            SetProgress((double)percent, message);
         }
+
         protected void SetProgress(string message) 
         {
-            rTracker?.SetProgress(message);
+            if (rTracker != null) 
+            {
+                rTracker.SetProgress(message);
+                return;
+            }
+
+            StorePendingProgress(null, message);
         }
 
         protected void SetError(string? errorMessage = null) 
@@ -106,6 +146,7 @@ namespace RMVC {
         {
             return RHelper.ClampPercent((double)parts / totalParts * 100);
         }
+
         protected double GetPercent(int totalParts) 
         {
             return RHelper.ClampPercent((double)totalParts / 10d);
@@ -113,5 +154,40 @@ namespace RMVC {
 
         protected string ErrorMessage { get { return rTracker?.ErrorMessage ?? string.Empty; } }
         protected bool ErrorOrAbort { get { return rTracker?.ErrorOrAbort ?? false; } }
+
+        private void StorePendingProgress(double? percent, string? message) 
+        {
+            if (percent.HasValue) 
+            {
+                double sanitizedPercent = RHelper.ClampPercent(percent.Value);
+
+                if (!pendingPercent.HasValue || sanitizedPercent > pendingPercent.Value)
+                    pendingPercent = sanitizedPercent;
+            }
+
+            if (!string.IsNullOrWhiteSpace(message))
+                pendingMessage = message;
+        }
+
+        private void ApplyPendingProgress() 
+        {
+            if (rTracker == null)
+                return;
+
+            if (pendingPercent.HasValue) 
+            {
+                rTracker.SetProgress(
+                    pendingPercent.Value,
+                    pendingMessage ?? string.Empty);
+            }
+            else if (!string.IsNullOrWhiteSpace(pendingMessage)) 
+            {
+                rTracker.SetProgress(pendingMessage);
+            }
+
+            pendingPercent = null;
+            pendingMessage = null;
+            pendingTitle = null;
+        }
     }
 }

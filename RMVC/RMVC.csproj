@@ -1,17 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+<PropertyGroup>
+  <PackageId>seanstardev.RMVC</PackageId>
+  <Version>1.0.0</Version>
+  <Authors>seanstardev</Authors>
+  <Description>RMVC core library.</Description>
+  <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  <RepositoryUrl>https://github.com/seanstardev/RMVC</RepositoryUrl>
+  <RepositoryType>git</RepositoryType>
+</PropertyGroup>
+
   <PropertyGroup>
     <TargetFrameworks>netstandard2.1;net8.0</TargetFrameworks>
     <ImplicitUsings>false</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
-
-<PropertyGroup>
-	<!-- Define the source file path -->
-	<SourceFilePath>$(ProjectDir)bin\$(Configuration)\netstandard2.1\$(TargetFileName)</SourceFilePath>
-	<!-- Define the target file directories -->
-	<TargetDir1>$(MSBuildThisFileDirectory)..\..\..\..\..\..\RADIO-Dev\RadioMC\Project\Assets\Plugins</TargetDir1>
-	<TargetDir2>$(MSBuildThisFileDirectory)..\..\..\..\..\..\RADIO-Dev\RadioMC2\RadioMC2\Assets\Plugins</TargetDir2>
-</PropertyGroup>
-
 </Project>

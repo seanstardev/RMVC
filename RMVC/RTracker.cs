@@ -16,7 +16,7 @@ namespace RMVC
         internal RFacade facade;
         internal RTracker? _parent;
 
-        private readonly double _cap;
+        private readonly double _weightInParent;
         private readonly bool _allowAutoUpdate;
 
         private RTracker? _child;
@@ -28,10 +28,10 @@ namespace RMVC
         private bool _abort;
         private bool _error;
 
-        internal RTracker(RCommandAsync command, RFacade facade, double cap, CancellationToken cancellationToken) 
+        internal RTracker(RCommandAsync command, RFacade facade, double weightInParent, CancellationToken cancellationToken) 
         {
             Id = Guid.NewGuid().ToString();
-            _cap = cap;
+            _weightInParent = weightInParent;
             _parent = null;
             _child = null;
             _localPercent = 0d;
@@ -50,10 +50,12 @@ namespace RMVC
         {
             List<RProgress> list = new List<RProgress>();
             RTracker[] rTrackerSet = GetAllRTrackersFlat();
-            foreach (RTracker tracker in rTrackerSet) {
+
+            foreach (RTracker tracker in rTrackerSet) 
+            {
                 
-                if (tracker != this && tracker._localPercent == 0) 
-                    continue;
+                //if (tracker != this && tracker._localPercent == 0) 
+                //    continue;
 
                 if (!tracker._allowAutoUpdate)
                     continue;
@@ -74,55 +76,50 @@ namespace RMVC
             _title = title;
             SendProgress();
         }
-
-        internal void SetProgress(string text) 
+        internal void SetProgress(string text)
         {
             if (!string.IsNullOrWhiteSpace(text))
                 _text = text;
-        
+
             SendProgress();
         }
 
-        internal void SetProgress(double percentComplete, string? text = null) 
+        internal void SetProgress(double percentComplete, string? text = null)
         {
             percentComplete = RHelper.ClampPercent(percentComplete);
-            
-            if (percentComplete <= _localPercent) 
-                return;
 
-            if (!string.IsNullOrWhiteSpace(text))
+            bool textChanged = false;
+
+            if (!string.IsNullOrWhiteSpace(text) && text != _text)
+            {
                 _text = text;
+                textChanged = true;
+            }
 
-            Log($"Setting progress in {Id}: Local percent: {_localPercent}, Increment: {percentComplete - _localPercent}");
-            UpdatePercent(percentComplete - _localPercent);
+            if (percentComplete > _localPercent)
+            {
+                Log($"Setting progress in {Id}: Local percent: {_localPercent}, Increment: {percentComplete - _localPercent}");
+                UpdatePercent(percentComplete - _localPercent);
+            }
+            else if (textChanged)
+            {
+                SendProgress();
+            }
         }
 
-        internal void SetProgress(int percentComplete, string? text = null) 
+        internal void SetProgress(int percentComplete, string? text = null)
         {
             percentComplete = SanitizePercent(percentComplete);
-            
-            if (percentComplete <= _localPercent) 
-                return;
 
-            if (!string.IsNullOrWhiteSpace(text))
-                _text = text;
-
-            UpdatePercent(percentComplete - _localPercent);
+            SetProgress((double)percentComplete, text);
         }
 
-        internal void SetProgress(int step, int total, string? text = null) 
+        internal void SetProgress(int step, int total, string? text = null)
         {
             double adjusted = GetPercent(step, total);
-            
-            if (adjusted <= _localPercent) 
-                return;
 
-            if (!string.IsNullOrWhiteSpace(text))
-                _text = text;
-
-            UpdatePercent(adjusted - _localPercent);
+            SetProgress(adjusted, text);
         }
-
         internal void SetError(string errorMessage) 
         {
             if (string.IsNullOrWhiteSpace(errorMessage))
@@ -144,7 +141,7 @@ namespace RMVC
             percentCap = RHelper.ClampPercent(percentCap);  // Ensure cap is within bounds
             Log($"Creating child tracker for {command.GetType().Name} with cap: {percentCap}");
 
-            _child = new RTracker(command, facade, percentCap * (_cap / 100d), Token);
+            _child = new RTracker(command, facade, percentCap /** (_weightInParent / 100d)*/, Token);
             _child._parent = this;
 
             return _child;
@@ -205,7 +202,7 @@ namespace RMVC
             if (_parent != null) 
             {
                 // Calculate parent increment proportionally based on this tracker's cap and apply it immediately
-                double parentIncrement = localPercentIncrement * (_cap / 100d);
+                double parentIncrement = localPercentIncrement * (_weightInParent / 100d);
 
                 // Propagate to parent with a fractional increment
                 _parent.UpdatePercent(parentIncrement);
@@ -219,18 +216,14 @@ namespace RMVC
             }
         }
 
-        private uint GetPercent(int current, int total) 
+        private double GetPercent(int current, int total)
         {
-            int percent = (int)((current / (double)total) * 100);
-            
-            if (percent > 100) 
-                percent = 100;
-            else if (percent < 0) 
-                percent = 0;
-            
-            return (uint)percent;
-        }
+            if (total <= 0)
+                return 0;
 
+            return RHelper.ClampPercent(
+                (current / (double)total) * 100d);
+        }
         private int SanitizePercent(int percent) 
         {
             if (percent > 100) 

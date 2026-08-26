@@ -5,7 +5,7 @@ VisualStudioVersion = 17.11.35312.102
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RMVCApp.Sample.Core", "RMVCApp.Sample.Core.csproj", "{2D6D4BD8-A9F0-4B21-9D81-E580615BB1C8}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RMVC", "..\..\RMVC\RMVC\RMVC\RMVC.csproj", "{91F96FF8-3790-431A-A7F0-34066A74C18A}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RMVC", "..\..\RMVC\RMVC.csproj", "{91F96FF8-3790-431A-A7F0-34066A74C18A}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
