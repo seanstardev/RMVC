@@ -1,10 +1,8 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.11.35312.102
+# Visual Studio Version 18
+VisualStudioVersion = 18.9.12112.369 stable
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RMVC", "..\..\..\RMVC\RMVC\RMVC\RMVC.csproj", "{6A0228EB-5CE5-4812-ABE1-E2B2BA903E68}"
-EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RMVCApp.Sample.Core", "..\RMVCApp.Sample.Core\RMVCApp.Sample.Core.csproj", "{8313ADBB-964C-4FA7-BF2D-94BF2EEB537F}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RMVCApp.Sample.Maui", "RMVCApp.Sample.Maui.csproj", "{91F00E0E-1DD6-4FD1-849A-E1696563C401}"
@@ -15,10 +13,6 @@ Global
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{6A0228EB-5CE5-4812-ABE1-E2B2BA903E68}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{6A0228EB-5CE5-4812-ABE1-E2B2BA903E68}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{6A0228EB-5CE5-4812-ABE1-E2B2BA903E68}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{6A0228EB-5CE5-4812-ABE1-E2B2BA903E68}.Release|Any CPU.Build.0 = Release|Any CPU
 		{8313ADBB-964C-4FA7-BF2D-94BF2EEB537F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{8313ADBB-964C-4FA7-BF2D-94BF2EEB537F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8313ADBB-964C-4FA7-BF2D-94BF2EEB537F}.Release|Any CPU.ActiveCfg = Release|Any CPU
