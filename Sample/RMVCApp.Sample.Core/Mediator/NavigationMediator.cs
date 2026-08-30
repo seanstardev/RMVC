@@ -2,16 +2,18 @@
 using RMVCApp.Sample.Core.Shared;
 using System;
 
-namespace RMVCApp.Sample.Core {
-    internal class NavigationMediator : RMediator {
-
+namespace RMVCApp.Sample.Core 
+{
+    internal class NavigationMediator : RMediator 
+    {
         private INavigationView? view => (INavigationView?)base.viewBase;
 
-
-        public NavigationMediator(Type view) : base(view) {
+        public NavigationMediator(Type view) : base(view) 
+        {
         }
 
-        protected override void Initialsed() {
+        protected override void Initialsed() 
+        {
             if (view != null) {
                 view.ShowHomeViewEvt += OnShowHome;
                 view.ShowCounterViewEvt += OnShowCounter;
@@ -19,22 +21,27 @@ namespace RMVCApp.Sample.Core {
             }
         }
 
-        protected override void Disposing() {
-            if (view != null) {
+        protected override void Disposing() 
+        {
+            if (view != null) 
+            {
                 view.ShowHomeViewEvt -= OnShowHome;
                 view.ShowCounterViewEvt -= OnShowCounter;
                 view.ShowWeatherViewEvt -= OnShowWeather;
             }
         }
 
-        private void OnShowHome() {
+        private void OnShowHome() 
+        {
             base.ExecuteCommand(new ShowViewCmd(Enums.ViewEnum.Home));
         }
 
-        private void OnShowCounter() {
+        private void OnShowCounter() 
+        {
             base.ExecuteCommand(new ShowViewCmd(Enums.ViewEnum.Counter));
         }
-        private void OnShowWeather() {
+        private void OnShowWeather() 
+        {
             base.ExecuteCommand(new ShowViewCmd(Enums.ViewEnum.Weather));
         }
     }

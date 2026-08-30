@@ -1,11 +1,24 @@
-﻿namespace RMVC {
-    public abstract class RCommandBase : RActor 
+﻿namespace RMVC
+{
+    public abstract class RCommandBase : RActor
     {
-        abstract internal void ExecuteCommandInternal(RCommand command);
+        protected internal RFacade? facade;
 
-        protected void ExecuteCommand(RCommand command) 
+        abstract internal void ExecuteUntypedInternal(
+            RFacade facade,
+            RTracker? rTracker = null,
+            double percentCap = 100d);
+
+        protected void ExecuteCommand(RCommand command)
         {
-            ExecuteCommandInternal(command);
+            facade?.ExecuteCommand(command);
+        }
+
+        protected TResult ExecuteCommand<TResult>(RCommand<TResult> command)
+        {
+            return facade != null
+                ? facade.ExecuteCommand(command)
+                : default!;
         }
     }
 }

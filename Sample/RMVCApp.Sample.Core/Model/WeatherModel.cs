@@ -3,18 +3,21 @@ using System.Linq;
 using System;
 using RMVCApp.Sample.Core.Shared;
 
-namespace RMVCApp.Sample.Core {
-    internal class WeatherModel : RModel {
-
+namespace RMVCApp.Sample.Core 
+{
+    internal class WeatherModel : RModel 
+    {
         public WeatherForecastDTO[]? forecasts { get; private set; }
 
-        public WeatherModel() {
+        public WeatherModel() 
+        {
             
         }
 
         private static readonly Random _random = new Random();
 
-        protected override void Initialise() {
+        protected override void Initialise() 
+        {
             var startDate = DateTime.Now.Date;
             var summaries = new[] { "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching" };
 
@@ -26,7 +29,5 @@ namespace RMVCApp.Sample.Core {
                 )
             ).ToArray();
         }
-
-
     }
 }

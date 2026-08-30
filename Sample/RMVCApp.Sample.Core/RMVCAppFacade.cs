@@ -1,9 +1,10 @@
 ﻿using global::RMVC;
 using RMVCApp.Sample.Core.Shared;
 
-namespace RMVCApp.Sample.Core {
-
-    public class RMVCAppFacade : RFacade {
+namespace RMVCApp.Sample.Core 
+{
+    public class RMVCAppFacade : RFacade 
+    {
         internal static RMVCAppFacade? Instance => RFacade.FacadeInstance<RMVCAppFacade>();
 
         internal IRAppShell? App => AppShell;
@@ -21,34 +22,39 @@ namespace RMVCApp.Sample.Core {
         internal WeatherMediator? WeatherMediator => base.Mediator<WeatherMediator>();
         internal ProgressMediator? ProgressMediator => base.Mediator<ProgressMediator>();
 
-        protected override RModel[] RegisterModels() {
-            return new RModel[] {
-                    new CounterModel(),
-                    new WeatherModel(),
-                    new ProgressModel()
-                };
+        protected override RModel[] RegisterModels() 
+        {
+            return new RModel[] 
+            {
+                new CounterModel(),
+                new WeatherModel(),
+                new ProgressModel()
+            };
         }
-        protected override RMediator[] RegisterMediators() {
-            return
-                new RMediator[]
-                {                
-                    new MainMediator(typeof(IMainView)),
-                    new NavigationMediator(typeof(INavigationView)),
-                    new HomeMediator(typeof(IHomeView)),
-                    new CounterMediator(typeof(ICounterView)),
-                    new WeatherMediator(typeof(IWeatherView)),
-                    new ProgressMediator(typeof(IProgressView))
-                };
+        protected override RMediator[] RegisterMediators() 
+        {
+            return new RMediator[]
+            {                
+                new MainMediator(typeof(IMainView)),
+                new NavigationMediator(typeof(INavigationView)),
+                new HomeMediator(typeof(IHomeView)),
+                new CounterMediator(typeof(ICounterView)),
+                new WeatherMediator(typeof(IWeatherView)),
+                new ProgressMediator(typeof(IProgressView))
+            };
         }
-        protected override RCommandBase RegisterStartupCommand() {
+        protected override RCommandBase RegisterStartupCommand() 
+        {
             return new StartupCmd();
         }
 
-        protected override RCommandBase? RegisterProgressCompleteCommand() {
+        protected override RCommandBase? RegisterProgressCompleteCommand() 
+        {
             return new SetProgressCompleteCmd();
         }
 
-        protected override RCommandBase? RegisterProgressUpdateCommand(RProgress[] progress) {
+        protected override RCommandBase? RegisterProgressUpdateCommand(RProgress[] progress) 
+        {
             return new SetProgressUpdateCmd(progress);
         }
     }

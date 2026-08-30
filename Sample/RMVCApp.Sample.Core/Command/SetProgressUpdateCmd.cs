@@ -1,18 +1,20 @@
 ﻿using RMVC;
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Text;
 
-namespace RMVCApp.Sample.Core {
-    internal class SetProgressUpdateCmd : RCommand {
+namespace RMVCApp.Sample.Core 
+{
+    internal class SetProgressUpdateCmd : RCommand 
+    {
         private readonly RProgress[] progress;
 
-        public SetProgressUpdateCmd(RProgress[] progress) {
+        public SetProgressUpdateCmd(RProgress[] progress) 
+        {
             this.progress = progress;
         }
 
-        protected override void Run() {
+        protected override void Run() 
+        {
             Debug.WriteLine($"{DateTime.Now} >>> Do update progress...");
 
             if (RMVCAppFacade.Instance != null && RMVCAppFacade.Instance?.ProgressModel != null)
@@ -20,11 +22,14 @@ namespace RMVCApp.Sample.Core {
             
             base.ExecuteCommand(new ShowViewCmd(Shared.Enums.ViewEnum.Progress));
             base.ExecuteCommand(new SetProgressViewCmd());
+        
             ProgressDebug();
         }
 
-        private void ProgressDebug() {
-            for (int i = 0; i < progress.Length; i++) {
+        private void ProgressDebug() 
+        {
+            for (int i = 0; i < progress.Length; i++) 
+            {
                 var p = progress[i];
                 Debug.WriteLine($"{p.Heading}: Part {i}:  {p.Percent}");
             }

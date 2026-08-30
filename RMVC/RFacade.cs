@@ -209,48 +209,91 @@ namespace RMVC
             }
         }
 
-        internal void ExecuteCommand(RCommandBase command) 
+        internal void ExecuteCommand(RCommandBase command)
         {
             ExecuteCommand(command, null);
         }
 
-        internal void ExecuteCommand(RCommandBase command, RTracker? rTracker = null, double percentCap = 100d) 
+        internal void ExecuteCommand(
+            RCommandBase command,
+            RTracker? rTracker = null,
+            double percentCap = 100d)
         {
             percentCap = RHelper.ClampPercent(percentCap);
 
-            if (command is RCommand syncCommand) 
-            {
-                // Synchronous execution
-                syncCommand.RunInternal(this);
-            }
-            else if (command is RCommandAsync asyncCommand) 
-            {
-                // Delegate async command execution
-                _ = ExecuteCommandAsync(asyncCommand, rTracker, percentCap);
-            }
+            command.ExecuteUntypedInternal(
+                this,
+                rTracker,
+                percentCap);
+        }
+
+        internal TResult ExecuteCommand<TResult>(
+            RCommand<TResult> command)
+        {
+            return command.RunInternal(this);
         }
 
         internal async Task ExecuteCommandAsync(
             RCommandAsync asyncCommand,
             RTracker? rTracker,
-            double percentCap) 
+            double percentCap)
         {
-            if (!asyncCommand.hasParent && !activeTasks.IsEmpty && asyncCommand.EnableAutoUpdate) {
+            await ExecuteCommandAsyncCore(
+                asyncCommand,
+                rTracker,
+                percentCap,
+                tracker => asyncCommand.RunInternalAsync(tracker));
+        }
+
+        internal async Task<TResult> ExecuteCommandAsync<TResult>(
+            RCommandAsync<TResult> asyncCommand,
+            RTracker? rTracker,
+            double percentCap)
+        {
+            TResult result = default!;
+
+            await ExecuteCommandAsyncCore(
+                asyncCommand,
+                rTracker,
+                percentCap,
+                async tracker =>
+                {
+                    result = await asyncCommand.RunInternalAsync(tracker);
+                });
+
+            return result;
+        }
+
+        private async Task ExecuteCommandAsyncCore(
+            RCommandAsyncBase asyncCommand,
+            RTracker? rTracker,
+            double percentCap,
+            Func<RTracker, Task> runCommandAsync)
+        {
+            if (!asyncCommand.hasParent && !activeTasks.IsEmpty && asyncCommand.EnableAutoUpdate)
+            {
                 Error("Cannot execute more than one top-level Async Command at a time.");
                 return;
             }
 
-            var cancellationTokenSource = rTracker != null ? CancellationTokenSource.CreateLinkedTokenSource(rTracker.Token) : new CancellationTokenSource();
+            var cancellationTokenSource = rTracker != null
+                ? CancellationTokenSource.CreateLinkedTokenSource(rTracker.Token)
+                : new CancellationTokenSource();
 
-            rTracker ??= new RTracker(asyncCommand, this, percentCap, cancellationTokenSource.Token);
+            RTracker activeTracker = rTracker
+                ?? new RTracker(
+                    asyncCommand,
+                    this,
+                    percentCap,
+                    cancellationTokenSource.Token);
 
             var task = Task.Run(async () =>
             {
-                try 
+                try
                 {
-                    await asyncCommand.RunInternalAsync(rTracker);
+                    await runCommandAsync(activeTracker);
                 }
-                catch (Exception ex) 
+                catch (Exception ex)
                 {
                     Log("ERROR CAUGHT in async command: " + ex.ToString());
                     asyncCommand.SetErrorInternal("RFacade Async Execution Error.");
@@ -258,18 +301,18 @@ namespace RMVC
             }, cancellationTokenSource.Token);
 
             // Track only top-level async commands
-            if (!asyncCommand.hasParent && !activeTasks.ContainsKey(task)) 
+            if (!asyncCommand.hasParent && !activeTasks.ContainsKey(task))
             {
                 activeTasks[task] = cancellationTokenSource;
             }
 
-            try 
+            try
             {
                 await task;
             }
-            finally 
+            finally
             {
-                if (!asyncCommand.hasParent && activeTasks.ContainsKey(task)) 
+                if (!asyncCommand.hasParent && activeTasks.ContainsKey(task))
                 {
                     HandleTaskComplete(asyncCommand);
                     activeTasks.TryRemove(task, out _);
@@ -277,7 +320,6 @@ namespace RMVC
                 }
             }
         }
-
         protected abstract RCommandBase RegisterStartupCommand();
         protected abstract RMediator[] RegisterMediators();
         protected abstract RModel[] RegisterModels();
@@ -317,7 +359,7 @@ namespace RMVC
             return promoterFacade;
         }
 
-        private void HandleTaskComplete(RCommandAsync command) 
+        private void HandleTaskComplete(RCommandAsyncBase command) 
         {
             command.HandleThreadExit();
 

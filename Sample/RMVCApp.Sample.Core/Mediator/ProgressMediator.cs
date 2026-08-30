@@ -2,31 +2,38 @@
 using RMVCApp.Sample.Core.Shared;
 using System;
 
-namespace RMVCApp.Sample.Core {
-    internal class ProgressMediator : RMediator {
+namespace RMVCApp.Sample.Core 
+{
+    internal class ProgressMediator : RMediator 
+    {
         private IProgressView? view => (IProgressView?)base.viewBase;
-        public ProgressMediator(Type view) : base(view) {
+        public ProgressMediator(Type view) : base(view) 
+        {
 
         }
-        public void SetView(RProgress[] progress) {
+        public void SetView(RProgress[] progress) 
+        {
             view?.SetProgress(progress);
         }
-        internal void ResetView() {
+        internal void ResetView() 
+        {
             view?.ResetView();
         }
 
-        protected override void Disposing() {
+        protected override void Disposing() 
+        {
             view!.AbortProgressEvt -= OnProgressAbort;
         }
 
-        protected override void Initialsed() {
+        protected override void Initialsed() 
+        {
             view!.AbortProgressEvt += OnProgressAbort;
             base.ExecuteCommand(new SetProgressViewCmd());
         }
 
-        private void OnProgressAbort() {
+        private void OnProgressAbort() 
+        {
             base.ExecuteCommand(new AbortProgressCmd());
         }
-
     }
 }
