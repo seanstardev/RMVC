@@ -12,7 +12,7 @@ namespace RMVCApp.Sample.Core
         // Models
         internal CounterModel? CounterModel => base.Model<CounterModel>();
         internal WeatherModel? WeatherModel => base.Model<WeatherModel>();
-        internal ProgressModel? ProgressModel => base.Model<ProgressModel>(); 
+        internal ProgressModel? ProgressModel => base.Model<ProgressModel>();
 
         // View Mediators
         internal MainMediator? MainMediator => base.Mediator<MainMediator>();

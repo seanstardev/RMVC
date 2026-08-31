@@ -20,5 +20,17 @@
                 ? facade.ExecuteCommand(command)
                 : default!;
         }
+
+        protected TModel? Model<TModel>()
+            where TModel : class, IRModel
+        {
+            return facade?.ResolveModel<TModel>();
+        }
+
+        protected TMediator? Mediator<TMediator>()
+            where TMediator : RMediator
+        {
+            return facade?.ResolveMediator<TMediator>();
+        }
     }
 }

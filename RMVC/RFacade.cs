@@ -144,6 +144,7 @@ namespace RMVC
 
             Log("Registered mediator + view: " + foundMediator.GetType().Name + " | " + view.GetType().Name);
         }
+
         public static void UnregisterActor(IRContract view) 
         {
             RMediator? foundMediator = null;
@@ -203,13 +204,38 @@ namespace RMVC
             Console.WriteLine($"{logMessage}");
         }
 
-
         public void AbortAllCommands() 
         {
             foreach (var cancellationSource in activeTasks.Values) 
             {
                 cancellationSource.Cancel();
             }
+        }
+
+        internal TModel? ResolveModel<TModel>()
+            where TModel : class, IRModel
+        {
+            if (modelsDictionary.TryGetValue(
+                typeof(TModel),
+                out IRModel? model))
+            {
+                return model as TModel;
+            }
+
+            return null;
+        }
+
+        internal TMediator? ResolveMediator<TMediator>()
+            where TMediator : RMediator
+        {
+            if (mediatorsDictionary.TryGetValue(
+                typeof(TMediator),
+                out RMediator? mediator))
+            {
+                return mediator as TMediator;
+            }
+
+            return null;
         }
 
         internal void ExecuteCommand(RCommandBase command)

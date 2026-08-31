@@ -6,6 +6,7 @@ namespace RMVCApp.Sample.Core
     {
         public CounterModel() 
         {
+
         }
 
         public int CounterCount { get; set; } = 0;
