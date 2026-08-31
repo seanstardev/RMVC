@@ -5,7 +5,7 @@ namespace RMVCApp.Sample.Core
 {
     internal static class RMVCAppConstants 
     {
-        public static int GetRandomUpdateDelayMilliseconds() 
+        public static int GetNextUpdateDelayMilliseconds() 
         {
             // Random random = new Random();
             // return random.Next(100, 1001);
@@ -91,7 +91,7 @@ namespace RMVCApp.Sample.Core
         {
             for (int i = 0; i < totalParts; i++) 
             {
-                await Task.Delay(RMVCAppConstants.GetRandomUpdateDelayMilliseconds());
+                await Task.Delay(RMVCAppConstants.GetNextUpdateDelayMilliseconds());
 
                 if (base.ErrorOrAbort)
                     return;

@@ -1,18 +1,20 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-<PropertyGroup>
-  <PackageId>seanstardev.RMVC</PackageId>
-  <Version>1.0.0</Version>
-  <Authors>seanstardev</Authors>
-  <Description>RMVC core library.</Description>
-  <PackageLicenseExpression>MIT</PackageLicenseExpression>
-  <RepositoryUrl>https://github.com/seanstardev/RMVC</RepositoryUrl>
-  <RepositoryType>git</RepositoryType>
-</PropertyGroup>
+  <PropertyGroup>
+    <PackageId>seanstardev.RMVC</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>seanstardev</Authors>
+    <Description>RMVC core library.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/seanstardev/RMVC</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
 
   <PropertyGroup>
-    <TargetFrameworks>netstandard2.1;net8.0</TargetFrameworks>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>8.0</LangVersion>
     <ImplicitUsings>false</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+
 </Project>

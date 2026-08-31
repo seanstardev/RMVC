@@ -206,7 +206,7 @@ namespace RMVC
             }
             else if (!string.IsNullOrWhiteSpace(pendingMessage))
             {
-                rTracker.SetProgress(pendingMessage);
+                rTracker.SetProgress(pendingMessage!);
             }
 
             pendingPercent = null;

@@ -7,7 +7,7 @@ namespace RMVCApp.Sample.Core
     {
         internal static RMVCAppFacade? Instance => RFacade.FacadeInstance<RMVCAppFacade>();
 
-        internal IRAppShell? App => AppShell;
+        internal IRAppShell? App => RFacade.AppShell;
 
         // Models
         internal CounterModel? CounterModel => base.Model<CounterModel>();
@@ -22,15 +22,16 @@ namespace RMVCApp.Sample.Core
         internal WeatherMediator? WeatherMediator => base.Mediator<WeatherMediator>();
         internal ProgressMediator? ProgressMediator => base.Mediator<ProgressMediator>();
 
-        protected override RModel[] RegisterModels() 
+        protected override IRModel[] RegisterModels() 
         {
-            return new RModel[] 
+            return new IRModel[] 
             {
                 new CounterModel(),
                 new WeatherModel(),
                 new ProgressModel()
             };
         }
+
         protected override RMediator[] RegisterMediators() 
         {
             return new RMediator[]
@@ -43,6 +44,7 @@ namespace RMVCApp.Sample.Core
                 new ProgressMediator(typeof(IProgressView))
             };
         }
+
         protected override RCommandBase RegisterStartupCommand() 
         {
             return new StartupCmd();

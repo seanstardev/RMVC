@@ -26,7 +26,7 @@ namespace RMVC
            new ConcurrentDictionary<Task, CancellationTokenSource>();
 
         private readonly Dictionary<Type, RMediator> mediatorsDictionary = new Dictionary<Type, RMediator>();
-        private readonly Dictionary<Type, RModel> modelsDictionary = new Dictionary<Type, RModel>();
+        private readonly Dictionary<Type, IRModel> modelsDictionary = new Dictionary<Type, IRModel>();
 
         private static readonly Dictionary<Type, RFacade> activeFacades = new Dictionary<Type, RFacade>();
 
@@ -73,12 +73,15 @@ namespace RMVC
                 facade.rCommander = new RCommander(facade);
 
                 var models = facade.RegisterModels();
-                
-                foreach (RModel model in models) 
+
+                foreach (IRModel model in models)
                 {
                     facade.modelsDictionary.Add(model.GetType(), model);
-                    model.rCommander = facade.rCommander;
-                    model.Initialise();
+
+                    if (model is RModel rModel)
+                    {
+                        rModel.rCommander = facade.rCommander;
+                    }
                 }
 
                 var mediators = facade.RegisterMediators();
@@ -322,7 +325,7 @@ namespace RMVC
         }
         protected abstract RCommandBase RegisterStartupCommand();
         protected abstract RMediator[] RegisterMediators();
-        protected abstract RModel[] RegisterModels();
+        protected abstract IRModel[] RegisterModels();
 
         protected static TFacade? FacadeInstance<TFacade>() where TFacade : RFacade 
         {
@@ -344,9 +347,9 @@ namespace RMVC
                 return null;
         }
 
-        protected TModel? Model<TModel>() where TModel : RModel 
+        protected TModel? Model<TModel>() where TModel : class, IRModel 
         {
-            if (modelsDictionary.TryGetValue(typeof(TModel), out RModel? model)) 
+            if (modelsDictionary.TryGetValue(typeof(TModel), out IRModel? model)) 
             {
                 return model as TModel;
             }
@@ -369,7 +372,8 @@ namespace RMVC
             }
         }
 
-        protected RFacade() {
+        protected RFacade() 
+        {
             if (!pendingFacades.Contains(GetType()))
             {
                 Fatal("Do not instantiate a Facade directly. Use the static Initialise() method.");
@@ -424,6 +428,5 @@ namespace RMVC
         {
             Log("RMVC - ERROR: " + message);
         }
-
     }
 }

@@ -1,11 +1,10 @@
-﻿namespace RMVC {
-    public abstract class RModel : RCommandExecutorBase 
+﻿namespace RMVC 
+{
+    public abstract class RModel : RCommandExecutorBase, IRModel
     {
         public RModel() : base() 
         {
 
         }
-        
-        abstract protected internal void Initialise();
     }
 }

@@ -2,12 +2,8 @@
 
 namespace RMVCApp.Sample.Core 
 {
-    internal class ProgressModel : RModel 
+    internal class ProgressModel : IRModel 
     {
         public RProgress[] Progress { get; set; } = new RProgress[] { };
-        protected override void Initialise() 
-        {
-
-        }
     }
 }

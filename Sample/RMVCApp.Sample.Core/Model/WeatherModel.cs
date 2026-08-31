@@ -5,18 +5,12 @@ using RMVCApp.Sample.Core.Shared;
 
 namespace RMVCApp.Sample.Core 
 {
-    internal class WeatherModel : RModel 
+    internal class WeatherModel : IRModel 
     {
         public WeatherForecastDTO[]? forecasts { get; private set; }
-
-        public WeatherModel() 
-        {
-            
-        }
-
         private static readonly Random _random = new Random();
 
-        protected override void Initialise() 
+        public WeatherModel()
         {
             var startDate = DateTime.Now.Date;
             var summaries = new[] { "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching" };
@@ -25,9 +19,8 @@ namespace RMVCApp.Sample.Core
                 index => new WeatherForecastDTO(
                     startDate.AddDays(index),
                     _random.Next(-20, 55), // Use _random instance for random number generation
-                    summaries[_random.Next(summaries.Length)]
-                )
-            ).ToArray();
+                    summaries[_random.Next(summaries.Length)])).ToArray();
+
         }
     }
 }
