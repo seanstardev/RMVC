@@ -12,7 +12,7 @@ namespace RMVC
         internal bool Error { get { return _error; } }
         internal CancellationToken Token { get; private set; }
         internal bool ErrorOrAbort { get { return _error || _abort; } }
-        internal RCommandAsync _command;
+        internal RCommandAsyncBase _command;
         internal RFacade facade;
         internal RTracker? _parent;
 
@@ -28,7 +28,7 @@ namespace RMVC
         private bool _abort;
         private bool _error;
 
-        internal RTracker(RCommandAsync command, RFacade facade, double weightInParent, CancellationToken cancellationToken) 
+        internal RTracker(RCommandAsyncBase command, RFacade facade, double weightInParent, CancellationToken cancellationToken) 
         {
             Id = Guid.NewGuid().ToString();
             _weightInParent = weightInParent;
@@ -136,7 +136,7 @@ namespace RMVC
             }
         }
 
-        internal RTracker CreateChild(RCommandAsync command, double percentCap) 
+        internal RTracker CreateChild(RCommandAsyncBase command, double percentCap) 
         {
             percentCap = RHelper.ClampPercent(percentCap);  // Ensure cap is within bounds
             Log($"Creating child tracker for {command.GetType().Name} with cap: {percentCap}");

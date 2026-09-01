@@ -1,8 +1,11 @@
 ﻿using System;
 
-namespace RMVCApp.Sample.Core.Shared {
-    public class WeatherForecastDTO {
-        public WeatherForecastDTO(DateTime date, int temperatureC, string? summary) {
+namespace RMVCApp.Sample.Core.Shared 
+{
+    public class WeatherForecastDTO 
+    {
+        public WeatherForecastDTO(DateTime date, int temperatureC, string? summary) 
+        {
             Date = date.Date;
             TemperatureC = temperatureC;
             Summary = summary;
