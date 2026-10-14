@@ -7,7 +7,7 @@ namespace RMVCApp.Forms {
     public partial class ProgressView : UserControl, IProgressView {
         public ProgressView() {
             InitializeComponent();
-            RMVCAppFacade.RegisterActor(this);
+            RMVCAppFacade.RegisterActor<IProgressView>(this);
         }
 
         public event Action? AbortProgressEvt;
@@ -45,7 +45,7 @@ namespace RMVCApp.Forms {
         }
 
         protected void HandleDisposing() {
-            RMVCAppFacade.UnregisterActor(this);
+            RMVCAppFacade.UnregisterActor<IProgressView>(this);
         }
 
         private void abortBtn_Click(object sender, EventArgs e) {

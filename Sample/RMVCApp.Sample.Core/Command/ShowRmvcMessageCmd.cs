@@ -1,9 +1,11 @@
-﻿namespace RMVCApp.Sample.Core 
-{
-    using global::RMVC;
-    using System.Threading.Tasks;
+using System.Threading.Tasks;
+using global::RMVC;
+using RMVCApp.Sample.Core.Command;
 
-    public class ShowRmvcMessageCmd : RCommandAsync 
+namespace RMVCApp.Sample.Core 
+{
+
+    internal class ShowRmvcMessageCmd : RMVCAppCommandBase<RVoid>
     {
         private readonly string message;
 
@@ -12,14 +14,14 @@
             this.message = message;
         }
 
-        protected override bool EnableAutoUpdate => false;
-
-        protected override async Task RunAsync() 
+        protected override async Task<RVoid> Run() 
         {
-            if (RMVCAppFacade.Instance?.App != null) 
+            if (base.App != null) 
             {
-                bool result = await RMVCAppFacade.Instance.App.ShowMessageBox("Attention", message, false);
+                _ = await base.App.ShowMessageBox("Attention", message, false);
             }
+
+            return await Complete();
         }
     }
 }

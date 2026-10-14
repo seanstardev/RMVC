@@ -36,15 +36,22 @@ else {
 @code {
     private WeatherForecastDTO[]? forecasts;
 
-    protected override async Task OnInitializedAsync() {
-        RMVCAppFacade.RegisterActor(this);
-        await Task.Delay(500);
-    }
-    public void Dispose() {
-        RMVCAppFacade.UnregisterActor(this);
+    protected override void OnInitialized()
+    {
+        RMVCAppFacade.RegisterActor<IWeatherView>(this);
     }
 
-    public void SetView(WeatherForecastDTO[]? forecasts) {
-        this.forecasts = forecasts;
+    public void Dispose() 
+    {
+        RMVCAppFacade.UnregisterActor<IWeatherView>(this);
+    }
+
+    public void SetView(WeatherForecastDTO[]? forecasts) 
+    {
+        _ = InvokeAsync(() =>
+        {
+            this.forecasts = forecasts;
+            StateHasChanged();
+        });
     }
 }

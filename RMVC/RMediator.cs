@@ -1,36 +1,158 @@
-﻿using System;
-namespace RMVC 
+using System;
+using System.Collections.Generic;
+namespace RMVC
 {
-    public abstract class RMediator : RCommandExecutorBase 
+    public abstract class RMediator : RCommandExecutorBase
     {
-        public bool IsActive => viewBase != null;
+        private readonly object actorGate = new object();
+        private readonly Queue<Action<IRContract>> pendingActorCalls = new Queue<Action<IRContract>>();
+        private bool actorAttached;
+        private bool drainingActorCalls;
+        internal IRContract? ActorBase { get; private set; }
+        internal Type ActorContractType { get; }
 
-        public IRContract? viewBase { get; set; }
-        internal Type viewBaseType { get; private set; }
-
-        public RMediator(Type view) : base()
+        internal RMediator(Type actorContractType) : base()
         {
-            this.viewBaseType = view;
+            ActorContractType = actorContractType;
         }
 
-        internal void UpdateViewBase(IRContract viewBase) 
+        // Retains references: use immutable data. Actors own UI dispatch.
+        internal void EnqueueActorAction(Action<IRContract> action)
         {
-            OnDisposing();
-            this.viewBase = viewBase;
+            lock (actorGate)
+            {
+                pendingActorCalls.Enqueue(action);
 
-            Initialsed();
+                if (!actorAttached || drainingActorCalls) return;
+
+                drainingActorCalls = true;
+            }
+
+            DrainActorCalls();
         }
 
-        private void OnDisposing() 
+        // Applications coordinate registration and unregistration.
+        internal void UpdateActorBase(IRContract actor)
         {
-            if (viewBase != null) 
+            if (!ActorContractType.IsInstanceOfType(actor))
+                throw new ArgumentException("Actor does not implement the mediator contract.", nameof(actor));
+
+            RemoveActorBase();
+
+            lock (actorGate) 
+            { 
+                ActorBase = actor; 
+                actorAttached = false; 
+            }
+
+            try
+            {
+                Initialised();
+            }
+            catch
+            {
+                try
+                {
+                    RemoveActorBase();
+                }
+                catch (Exception ex)
+                {
+                    RFacade.Log(
+                        $"ACTOR CLEANUP ERROR: mediator={GetType().FullName}; {ex}");
+                }
+
+                throw;
+            }
+
+            lock (actorGate)
+            {
+                actorAttached = true;
+
+                if (drainingActorCalls || pendingActorCalls.Count == 0) 
+                    return;
+                
+                drainingActorCalls = true;
+            }
+
+            DrainActorCalls();
+        }
+
+        internal void RemoveActorBase()
+        {
+            lock (actorGate)
+            {
+                if (ActorBase == null) return;
+
+                actorAttached = false;
+
+                pendingActorCalls.Clear();
+            }
+            try
             {
                 Disposing();
-                viewBase = null;
+            }
+            finally
+            {
+                lock (actorGate) 
+                { 
+                    ActorBase = null; 
+                    pendingActorCalls.Clear(); 
+                }
             }
         }
 
-        abstract protected void Initialsed();
-        abstract protected void Disposing();
+        private void DrainActorCalls()
+        {
+            try
+            {
+                while (true)
+                {
+                    Action<IRContract> action;
+
+                    IRContract actor;
+
+                    lock (actorGate)
+                    {
+                        if (!actorAttached || ActorBase == null || pendingActorCalls.Count == 0)
+                        {
+                            drainingActorCalls = false;
+                            return;
+                        }
+
+                        actor = ActorBase;
+
+                        action = pendingActorCalls.Dequeue();
+                    }
+
+                    action(actor);
+                }
+            }
+            catch
+            {
+                lock (actorGate)
+                {
+                    pendingActorCalls.Clear();
+                    drainingActorCalls = false;
+                }
+
+                throw;
+            }
+        }
+        protected abstract void Initialised();
+        protected abstract void Disposing();
+    }
+
+    public abstract class RMediator<TActor> : RMediator
+        where TActor : class, IRContract
+    {
+        protected RMediator() : base(typeof(TActor))
+        {
+
+        }
+
+        protected TActor? actor => (TActor?)ActorBase;
+
+        protected void WithActor(Action<TActor> action)
+            => EnqueueActorAction(actor => action((TActor)actor));
     }
 }

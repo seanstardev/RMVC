@@ -1,12 +1,14 @@
-﻿namespace RMVC 
+namespace RMVC
 {
-    public abstract class RCommandExecutorBase : RActor 
+    public abstract class RCommandExecutorBase
     {
-        internal RCommander? rCommander;
+        public string Name => GetType().Name;
 
-        protected void ExecuteCommand(RCommandBase command) 
-        {
-            rCommander?.Facade?.ExecuteCommand(command);
-        }
+        internal RCommandExecutorBase() { }
+
+        internal RFacade? Facade { get; set; }
+
+        protected void Execute(RCommandBase command)
+            => Facade?.Execute(command, GetType().FullName);
     }
 }

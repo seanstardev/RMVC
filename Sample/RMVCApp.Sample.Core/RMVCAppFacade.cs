@@ -1,27 +1,9 @@
 ﻿using global::RMVC;
-using RMVCApp.Sample.Core.Shared;
 
 namespace RMVCApp.Sample.Core 
 {
     public class RMVCAppFacade : RFacade 
     {
-        internal static RMVCAppFacade? Instance => RFacade.FacadeInstance<RMVCAppFacade>();
-
-        internal IRAppShell? App => RFacade.AppShell;
-
-        // Models
-        internal CounterModel? CounterModel => base.Model<CounterModel>();
-        internal WeatherModel? WeatherModel => base.Model<WeatherModel>();
-        internal ProgressModel? ProgressModel => base.Model<ProgressModel>();
-
-        // View Mediators
-        internal MainMediator? MainMediator => base.Mediator<MainMediator>();
-        internal NavigationMediator? NavigationMediator => base.Mediator<NavigationMediator>();
-        internal HomeMediator? HomeMediator => base.Mediator<HomeMediator>();
-        internal CounterMediator? CounterMediator => base.Mediator<CounterMediator>();
-        internal WeatherMediator? WeatherMediator => base.Mediator<WeatherMediator>();
-        internal ProgressMediator? ProgressMediator => base.Mediator<ProgressMediator>();
-
         protected override IRModel[] RegisterModels() 
         {
             return new IRModel[] 
@@ -36,12 +18,12 @@ namespace RMVCApp.Sample.Core
         {
             return new RMediator[]
             {                
-                new MainMediator(typeof(IMainView)),
-                new NavigationMediator(typeof(INavigationView)),
-                new HomeMediator(typeof(IHomeView)),
-                new CounterMediator(typeof(ICounterView)),
-                new WeatherMediator(typeof(IWeatherView)),
-                new ProgressMediator(typeof(IProgressView))
+                new MainMediator(),
+                new NavigationMediator(),
+                new HomeMediator(),
+                new CounterMediator(),
+                new WeatherMediator(),
+                new ProgressMediator()
             };
         }
 
@@ -50,14 +32,17 @@ namespace RMVCApp.Sample.Core
             return new StartupCmd();
         }
 
-        protected override RCommandBase? RegisterProgressCompleteCommand() 
+        protected override RCommandBase? RegisterProgressUpdateCommand(
+            string chainId, 
+            RProgress[] progress)
         {
-            return new SetProgressCompleteCmd();
+            return new SetProgressUpdateCmd(chainId, progress);
         }
 
-        protected override RCommandBase? RegisterProgressUpdateCommand(RProgress[] progress) 
+        protected override RCommandBase? RegisterProgressCompleteCommand(
+            string chainId)
         {
-            return new SetProgressUpdateCmd(progress);
+            return new SetProgressCompleteCmd(chainId);
         }
     }
 }

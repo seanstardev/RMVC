@@ -1,56 +1,63 @@
 ﻿@namespace RMVCApp.Maui.Components
-@using System.Diagnostics
 @using RMVCApp.Sample.Core.Shared
 @implements IProgressView
 @implements IDisposable
 
 @code {
+
     public event Action? AbortProgressEvt;
 
-    private IEnumerable<RProgress> _progressItems = Enumerable.Empty<RProgress>();
+    private IEnumerable<RProgress> _progressItems = 
+    Enumerable.Empty<RProgress>();
 
-    // Dynamically update progress items
-    public void SetProgress(RProgress[] progress) {
-        _progressItems = progress;
-
-        // Ensure UI updates happen on the dispatcher thread
-        InvokeAsync(() => {
-            StateHasChanged(); // Force UI refresh
+    public void SetProgress(RProgress[] progress)
+    {
+        _ = InvokeAsync(() =>
+        {
+            _progressItems = progress;
+            StateHasChanged();
         });
     }
 
-    public void ResetView() {
-        _progressItems = Enumerable.Empty<RProgress>();
-
-        InvokeAsync(() => {
-            StateHasChanged(); // Force UI refresh
+    public void ResetView()
+    {
+        _ = InvokeAsync(() =>
+        {
+            _progressItems = Enumerable.Empty<RProgress>();
+            StateHasChanged();
         });
     }
 
     [Parameter]
-    public IEnumerable<RProgress> ProgressItems {
+    public IEnumerable<RProgress> ProgressItems 
+    {
         get => _progressItems;
-        set {
+        set 
+        {
             _progressItems = value;
             StateHasChanged();
         }
     }
 
-    protected override void OnInitialized() {
-        RMVCAppFacade.RegisterActor(this);
+    protected override void OnInitialized() 
+    {
+        RMVCAppFacade.RegisterActor<IProgressView>(this);
     }
 
-    public void Dispose() {
-        RMVCAppFacade.UnregisterActor(this);
+    public void Dispose() 
+    {
+        RMVCAppFacade.UnregisterActor<IProgressView>(this);
     }
 
-    private void OnAbort() {
+    private void OnAbort() 
+    {
         AbortProgressEvt?.Invoke();
     }
 }
 
 <!-- Render Nothing If No Progress Items -->
-@if (_progressItems.Any()) {
+@if (_progressItems.Any()) 
+{
     <!-- Progress UI -->
     <div class="progress-container">
         <!-- Render Progress Items -->

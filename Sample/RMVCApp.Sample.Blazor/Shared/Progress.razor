@@ -67,29 +67,36 @@
 
     private IEnumerable<global::RMVC.RProgress> _progressItems = Enumerable.Empty<global::RMVC.RProgress>();
 
-    public void SetProgress(global::RMVC.RProgress[] progress) {
-        _progressItems = progress;
-
-        // Force UI refresh
-        InvokeAsync(StateHasChanged);
+    public void SetProgress(global::RMVC.RProgress[] progress) 
+    {
+        _ = InvokeAsync(() =>
+        {
+            _progressItems = progress;
+            StateHasChanged();
+        });
     }
 
-    public void ResetView() {
-        _progressItems = Enumerable.Empty<global::RMVC.RProgress>();
-
-        // Force UI refresh
-        InvokeAsync(StateHasChanged);
+    public void ResetView() 
+    {
+        _ = InvokeAsync(() =>
+        {
+            _progressItems = Enumerable.Empty<global::RMVC.RProgress>();
+            StateHasChanged();
+        });
     }
 
-    protected override void OnInitialized() {
-        RMVCAppFacade.RegisterActor(this);
+    protected override void OnInitialized() 
+    {
+        RMVCAppFacade.RegisterActor<IProgressView>(this);
     }
 
-    public void Dispose() {
-        RMVCAppFacade.UnregisterActor(this);
+    public void Dispose() 
+    {
+        RMVCAppFacade.UnregisterActor<IProgressView>(this);
     }
 
-    private void OnAbort() {
+    private void OnAbort() 
+    {
         AbortProgressEvt?.Invoke();
     }
 }

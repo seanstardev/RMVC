@@ -1,6 +1,6 @@
-﻿namespace RMVC 
+namespace RMVC
 {
-    public class RProgress 
+    public sealed class RProgress
     {
         public int Percent { get; }
         public string Message { get; }
@@ -8,10 +8,10 @@
         public string Id { get; }
 
         internal RProgress(
-            int percent
-            , string message
-            , string heading
-            , string id) 
+            int percent,
+            string message,
+            string heading,
+            string id)
         {
             if (percent < 0) percent = 0;
             if (percent > 100) percent = 100;

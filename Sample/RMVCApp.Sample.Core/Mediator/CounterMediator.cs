@@ -1,42 +1,35 @@
 ﻿using RMVC;
 using RMVCApp.Sample.Core.Shared;
-using System;
 
-namespace RMVCApp.Sample.Core {
-    internal class CounterMediator : RMediator 
+namespace RMVCApp.Sample.Core 
+{
+    internal class CounterMediator : RMediator<ICounterView>
     {
-        private ICounterView? view => (ICounterView?)base.viewBase;
-
-        public CounterMediator(Type view) : base(view) 
-        { 
-        }
-
         internal void SetView(int counterCount) 
         {
-            view?.SetCounter(counterCount);
+            actor?.SetCounter(counterCount);
         }
         
         private void OnSetCounter(int count) 
         {
-            base.ExecuteCommand(new SetCounterValueCmd(count));
+            base.Execute(new SetCounterValueCmd(count));
         }
 
-        protected override void Initialsed() 
+        protected override void Initialised() 
         {
-            if (view != null) 
+            if (actor != null) 
             {
-                view.SetCounterEvt += OnSetCounter;
+                actor.SetCounterEvt += OnSetCounter;
             }
-            base.ExecuteCommand(new SetCounterViewCmd());
+            base.Execute(new SetCounterViewCmd());
         }
 
         protected override void Disposing() 
         {
-            if (view != null) 
+            if (actor != null) 
             {
-                view.SetCounterEvt -= OnSetCounter;
+                actor.SetCounterEvt -= OnSetCounter;
             }
         }
-
     }
 }

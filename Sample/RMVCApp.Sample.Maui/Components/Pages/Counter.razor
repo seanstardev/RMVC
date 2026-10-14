@@ -1,5 +1,4 @@
 ﻿@page "/counter"
-@using System.Diagnostics
 @using RMVCApp.Sample.Core.Shared
 @implements ICounterView
 @implements IDisposable
@@ -18,15 +17,20 @@
     private int currentCount = 0;
 
     protected override void OnInitialized() {
-        RMVCAppFacade.RegisterActor(this);
+        RMVCAppFacade.RegisterActor<ICounterView>(this);
     }
 
     public void Dispose() {
-        RMVCAppFacade.UnregisterActor(this);
+        RMVCAppFacade.UnregisterActor<ICounterView>(this);
     }
 
-    public void SetCounter(int val) {
-        currentCount = val;
+    public void SetCounter(int val)
+    {
+        _ = InvokeAsync(() =>
+        {
+            currentCount = val;
+            StateHasChanged();
+        });
     }
 
     private void IncrementCount() {

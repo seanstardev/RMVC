@@ -7,7 +7,7 @@ namespace RMVCApp.Forms {
         public WeatherView() 
         {
             InitializeComponent();
-            RMVCAppFacade.RegisterActor(this);
+            RMVCAppFacade.RegisterActor<IWeatherView>(this);
         }
 
         public void SetView(WeatherForecastDTO[]? forecasts) 
@@ -31,7 +31,7 @@ namespace RMVCApp.Forms {
 
         protected void HandleDisposing() 
         {
-            RMVCAppFacade.UnregisterActor(this);
+            RMVCAppFacade.UnregisterActor<IWeatherView>(this);
         }
     }
 }

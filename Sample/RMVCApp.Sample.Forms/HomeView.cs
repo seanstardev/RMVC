@@ -1,20 +1,25 @@
 ﻿using RMVCApp.Sample.Core;
 using RMVCApp.Sample.Core.Shared;
 
-namespace RMVCApp.Forms {
-    public partial class HomeView : UserControl, IHomeView {
-        public HomeView() {
+namespace RMVCApp.Forms 
+{
+    public partial class HomeView : UserControl, IHomeView 
+    {
+        public HomeView() 
+        {
             InitializeComponent();
-            RMVCAppFacade.RegisterActor(this);
+            RMVCAppFacade.RegisterActor<IHomeView>(this);
         }
         public event Action<string>? ShowRmvcMessageEvt;
         public event Action? RunRmvcProgressTestEvt;
 
-        public void SetView() {
+        public void SetView() 
+        {
 
         }
-        protected void HandleDisposing() {
-            RMVCAppFacade.UnregisterActor(this);
+        protected void HandleDisposing() 
+        {
+            RMVCAppFacade.UnregisterActor<IHomeView>(this);
         }
         private void testButton_Click(object sender, EventArgs e) {
             ShowRmvcMessageEvt?.Invoke("Hello from RMVC.");

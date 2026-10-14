@@ -1,11 +1,20 @@
-﻿using System;
+using System;
 
-namespace RMVC {
-    internal static class RHelper 
+namespace RMVC
+{
+    internal static class RHelper
     {
-        internal static double ClampPercent(double d) 
+        public static double ClampPercent(double percent)
         {
-            return Math.Max(0, Math.Min(d, 100));
+            if (double.IsNaN(percent) || double.IsInfinity(percent))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(percent),
+                    percent,
+                    "Progress percentages and caps must be finite.");
+            }
+
+            return Math.Max(0, Math.Min(percent, 100));
         }
     }
 }

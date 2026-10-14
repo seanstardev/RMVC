@@ -1,42 +1,23 @@
-﻿namespace RMVC
+using System.Threading.Tasks;
+
+namespace RMVC
 {
-    public abstract class RCommand : RCommandBase
-    {
-        protected abstract void Run();
-
-        internal void RunInternal(RFacade facade)
-        {
-            this.facade = facade;
-            Run();
-        }
-
-        internal override void ExecuteUntypedInternal(
-            RFacade facade,
-            RTracker? rTracker = null,
-            double percentCap = 100d)
-        {
-            // Synchronous execution
-            RunInternal(facade);
-        }
-    }
-
     public abstract class RCommand<TResult> : RCommandBase
     {
-        protected abstract TResult Run();
+        protected abstract Task<TResult> Run();
 
-        internal TResult RunInternal(RFacade facade)
+        internal async Task<TResult> RunInternal(RTracker tracker)
         {
-            this.facade = facade;
-            return Run();
+            TResult result = default!;
+
+            await RunInternalCore(
+                tracker, 
+                async () => result = await Run().ConfigureAwait(false)).ConfigureAwait(false);
+
+            return result;
         }
 
-        internal override void ExecuteUntypedInternal(
-            RFacade facade,
-            RTracker? rTracker = null,
-            double percentCap = 100d)
-        {
-            // Synchronous execution
-            RunInternal(facade);
-        }
+        internal override async Task ExecuteUntypedInternal(RTracker tracker)
+            => await RunInternal(tracker).ConfigureAwait(false);
     }
 }

@@ -1,6 +1,6 @@
-﻿namespace RMVC 
+namespace RMVC
 {
-    public interface IRContract 
+    public interface IRContract
     {
 
     }

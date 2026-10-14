@@ -1,33 +1,29 @@
 ﻿using RMVC;
-using System;
 using RMVCApp.Sample.Core.Shared;
 
 namespace RMVCApp.Sample.Core 
 {
-    internal class HomeMediator : RMediator 
+    internal class HomeMediator : RMediator <IHomeView>
     {
-        private IHomeView? view => (IHomeView?)base.viewBase;
-        public HomeMediator(Type view) : base(view) 
-        { 
-        }
-
         private void OnShowRmvcMessage(string message) 
         {
-            base.ExecuteCommand(new ShowRmvcMessageCmd(message));
+            base.Execute(new ShowRmvcMessageCmd(message));
         }
+
         private void OnRunRmvcProgressTest() 
         {
-            base.ExecuteCommand(new RunProgressTestCmd());
+            base.Execute(new RunProgressTestCmd());
         }
-        protected override void Initialsed() 
+
+        protected override void Initialised() 
         {
-            view!.ShowRmvcMessageEvt += OnShowRmvcMessage;
-            view!.RunRmvcProgressTestEvt += OnRunRmvcProgressTest;
+            actor!.ShowRmvcMessageEvt += OnShowRmvcMessage;
+            actor!.RunRmvcProgressTestEvt += OnRunRmvcProgressTest;
         }
         protected override void Disposing() 
         {
-            view!.ShowRmvcMessageEvt -= OnShowRmvcMessage;
-            view!.RunRmvcProgressTestEvt -= OnRunRmvcProgressTest;
+            actor!.ShowRmvcMessageEvt -= OnShowRmvcMessage;
+            actor!.RunRmvcProgressTestEvt -= OnRunRmvcProgressTest;
         }
     }
 }

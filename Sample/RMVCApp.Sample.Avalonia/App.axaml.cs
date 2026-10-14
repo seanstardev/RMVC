@@ -15,14 +15,20 @@ using Avalonia.Threading;
 using System.Threading.Tasks;
 using RMVCApp.Sample.Core;
 
-namespace RMVCApp.Avalonia {
-    public partial class App : Application, IRAppShell {
-        public override void Initialize() {
+namespace RMVCApp.Avalonia 
+{
+    public partial class App : Application, IRAppShell 
+    {
+
+        public override void Initialize() 
+        {
             AvaloniaXamlLoader.Load(this);
         }
         
-        public override void OnFrameworkInitializationCompleted() {
-            if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop) {
+        public override void OnFrameworkInitializationCompleted() 
+        {
+            if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop) 
+            {
                 // Line below is needed to remove Avalonia data validation.
                 // Without this line you will get duplicate validations from both Avalonia and CT
                 BindingPlugins.DataValidators.RemoveAt(0);
@@ -31,7 +37,7 @@ namespace RMVCApp.Avalonia {
                     DataContext = new MainWindowViewModel(),
                 };
 
-                RMVCAppFacade.Create(typeof(RMVCAppFacade), this);
+                RMVCAppFacade.Create<RMVCAppFacade>(this);
 
                 desktop.MainWindow = mainWindow;
             }
@@ -39,13 +45,11 @@ namespace RMVCApp.Avalonia {
             base.OnFrameworkInitializationCompleted();
         }
 
-        public void SetAppEnabled(bool doEnable) {
-
-        }
-
-        public async Task<bool> ShowMessageBox(string? title, string message, bool isYesNo) {
-
-            if (Application.Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop || desktop.MainWindow is null) {
+        public async Task<bool> ShowMessageBox(string? title, string message, bool isYesNo) 
+        {
+            if (Application.Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop || 
+                desktop.MainWindow is null) 
+            {
                 Debug.WriteLine("Unable to display message box: desktop application lifetime or main window is null.");
                 return false;
             }
@@ -64,7 +68,8 @@ namespace RMVCApp.Avalonia {
                         new ButtonDefinition { Name = "OK" }
                     };
 
-                var messageBox = MessageBoxManager.GetMessageBoxCustom(new MessageBoxCustomParams {
+                var messageBox = MessageBoxManager.GetMessageBoxCustom(new MessageBoxCustomParams 
+                {
                     ContentTitle = title ?? "Confirm",
                     ContentMessage = message ?? string.Empty,
                     ButtonDefinitions = buttonDefinitions,
@@ -72,9 +77,21 @@ namespace RMVCApp.Avalonia {
                     WindowStartupLocation = WindowStartupLocation.CenterOwner
                 });
 
-                var dialogResult = await messageBox.ShowWindowDialogAsync(desktop.MainWindow);
-                return dialogResult == "Yes";
+                var dialogResult = 
+                    await messageBox.ShowWindowDialogAsync(desktop.MainWindow);
+                
+                return dialogResult == (isYesNo ? "Yes" : "OK");
             });
+        }
+
+        public void HandleOperationsCompleted()
+        {
+
+        }
+
+        public void HandleOperationsStarted()
+        {
+
         }
     }
 }

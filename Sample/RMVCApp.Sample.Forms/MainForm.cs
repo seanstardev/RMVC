@@ -8,26 +8,34 @@ namespace RMVCApp.Forms
         private ProgressForm? _progressForm = null;
         public MainForm() 
         {
-
-            RMVCAppFacade.Create(typeof(RMVCAppFacade), this);
+            RMVCAppFacade.Create<RMVCAppFacade>(this);
 
             InitializeComponent();
             mainView1.mainFormParent = this;
         }
 
-
-        public void SetAppEnabled(bool doEnable) 
+        public Task<bool> ShowMessageBox(
+            string title,
+            string message,
+            bool isYesNo = false)
         {
+            if (InvokeRequired)
+            {
+                return (Task<bool>)Invoke(
+                    new Func<Task<bool>>(
+                        () => ShowMessageBox(title, message, isYesNo)));
+            }
 
-        }
+            var buttons = isYesNo
+                ? MessageBoxButtons.OKCancel
+                : MessageBoxButtons.OK;
 
-        public Task<bool> ShowMessageBox(string title, string message, bool isYesNo = false) 
-        {
-            MessageBoxButtons messageBoxButtons = isYesNo ? MessageBoxButtons.OKCancel : MessageBoxButtons.OK;
-
-            MessageBoxIcon messageBoxIcon = MessageBoxIcon.Information;
-
-            var result = MessageBox.Show(message, title, messageBoxButtons, messageBoxIcon);
+            var result = MessageBox.Show(
+                this,
+                message,
+                title,
+                buttons,
+                MessageBoxIcon.Information);
 
             return Task.FromResult(result == DialogResult.OK);
         }
@@ -48,6 +56,16 @@ namespace RMVCApp.Forms
                 _progressForm = new ProgressForm();
                 _progressForm.Show(this); // Show it as a modal dialog overlay
             }
+        }
+
+        public void HandleOperationsCompleted()
+        {
+
+        }
+
+        public void HandleOperationsStarted()
+        {
+
         }
     }
 }

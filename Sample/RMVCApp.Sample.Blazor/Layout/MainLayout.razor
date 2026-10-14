@@ -1,6 +1,5 @@
 ﻿@using RMVCApp.Sample.Core
 @using RMVCApp.Sample.Core.Shared
-@using System.Diagnostics
 
 @inject IDialogService DialogService
 @inherits LayoutComponentBase
@@ -89,55 +88,69 @@
     private bool _isDarkMode = true;
     private MudTheme? _theme = null;
 
-    protected override void OnInitialized() {
-        RMVCAppFacade.Create(typeof(RMVCAppFacade), this);
+    protected override void OnInitialized() 
+    {
+        RMVCAppFacade.Create<RMVCAppFacade>(this);
+
         base.OnInitialized();
 
-        _theme = new() {
-                PaletteLight = _lightPalette,
-                PaletteDark = _darkPalette,
-                LayoutProperties = new LayoutProperties()
-            };
-    }
-    public void ShowView(Enums.ViewEnum viewEnum) {
-
-    }
-    public void SetAppEnabled(bool doEnable) {
-
+        _theme = new() 
+        {
+            PaletteLight = _lightPalette,
+            PaletteDark = _darkPalette,
+            LayoutProperties = new LayoutProperties()
+        };
     }
 
-    public async Task<bool> ShowMessageBox(string title, string message, bool isYesNo = false) {
-        bool? result = await DialogService.ShowMessageBox(
-            title,
-            message,
-            yesText: isYesNo ? "Yes" : "OK",
-            noText: isYesNo ? "No" : null
-        );
+    public void ShowView(Enums.ViewEnum viewEnum) 
+    {
+
+    }
+
+    public async Task<bool> ShowMessageBox(string title, string message, bool isYesNo = false) 
+    {
+        bool? result = null;
+
+        await InvokeAsync(async () =>
+        {
+            result = await DialogService.ShowMessageBox(
+                title,
+                message,
+                yesText: isYesNo ? "Yes" : "OK",
+                noText: isYesNo ? "No" : null);
+        });
 
         return result ?? false;
     }
 
-    public void Dispose() {
-    }
+    public void Dispose() { }
 
-    private void DrawerToggle() {
+    public void HandleOperationsStarted() { }
+
+    public void HandleOperationsCompleted() { }
+
+    private void DrawerToggle() 
+    {
         _drawerOpen = !_drawerOpen;
     }
 
-    private void DarkModeToggle() {
+    private void DarkModeToggle() 
+    {
         _isDarkMode = !_isDarkMode;
     }
 
-    private readonly PaletteLight _lightPalette = new() {
+    private readonly PaletteLight _lightPalette = new() 
+    {
             Black = "#110e2d",
             AppbarText = "#424242",
             AppbarBackground = "rgba(255,255,255,0.8)",
             DrawerBackground = "#ffffff",
             GrayLight = "#e8e8e8",
             GrayLighter = "#f9f9f9",
-        };
+    };
 
-    private readonly PaletteDark _darkPalette = new() {
+    private readonly PaletteDark _darkPalette = new() 
+    {
             Primary = "#7e6fff",
             Surface = "#1e1e2d",
             Background = "#1a1a27",
@@ -165,7 +178,8 @@
             OverlayLight = "#1e1e2d80",
         };
 
-    public string DarkLightModeButtonIcon => _isDarkMode switch {
+    public string DarkLightModeButtonIcon => _isDarkMode switch 
+    {
         true => Icons.Material.Rounded.AutoMode,
         false => Icons.Material.Outlined.DarkMode,
     };

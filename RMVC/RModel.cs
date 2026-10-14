@@ -1,8 +1,8 @@
-﻿namespace RMVC 
+namespace RMVC
 {
     public abstract class RModel : RCommandExecutorBase, IRModel
     {
-        public RModel() : base() 
+        public RModel() : base()
         {
 
         }

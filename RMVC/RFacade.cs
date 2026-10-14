@@ -1,5 +1,4 @@
-﻿using System;
-using System.Collections.Concurrent;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
@@ -7,194 +6,287 @@ using System.Threading.Tasks;
 
 namespace RMVC
 {
-    public abstract class RFacade 
+    public abstract class RFacade
     {
-        public static bool EnableDebugMode { get; set; } = false;
-        public static bool EnableTestMode { get; set; } = false;
+        public static bool EnableDebugMode { get; set; }
 
-        private static bool hasBeenConfigured = false;
+        private static readonly object registryGate = new object();
+        private static bool hasBeenConfigured;
 
-        private RCommander? rCommander = null;
-        
-        private DateTime lastProgressUpdateTime = DateTime.MinValue;
+        private static readonly object operationGate = new object();
+        private static readonly Dictionary<CancellationTokenSource, RTracker> activeOperations =
+            new Dictionary<CancellationTokenSource, RTracker>();
+        private static readonly Queue<bool> operationNotifications = new Queue<bool>();
+        private static bool deliveringOperationNotifications;
 
-        private static RFacade? promoterFacade = null;
-        private static Type? promoterType = null;
-        internal protected static IRAppShell? AppShell { get; private set; } = null;
+        private static RFacade? promoterFacade;
+        private static Type? promoterType;
+        private static IRAppShell? appShell;
 
-        private readonly ConcurrentDictionary<Task, CancellationTokenSource> activeTasks =
-           new ConcurrentDictionary<Task, CancellationTokenSource>();
-
-        private readonly Dictionary<Type, RMediator> mediatorsDictionary = new Dictionary<Type, RMediator>();
-        private readonly Dictionary<Type, IRModel> modelsDictionary = new Dictionary<Type, IRModel>();
-
-        private static readonly Dictionary<Type, RFacade> activeFacades = new Dictionary<Type, RFacade>();
-
-        private static readonly HashSet<Type> pendingFacades = new HashSet<Type>();
-
-        public static void Create(Type facadeConcreteType, IRAppShell? appShell = null) 
+        internal protected static IRAppShell? AppShell
         {
-            if (facadeConcreteType == null) 
+            get { lock (registryGate) { return appShell; } }
+        }
+
+        private readonly Dictionary<Type, RMediator> mediatorsDictionary = 
+            new Dictionary<Type, RMediator>();
+        private readonly Dictionary<Type, RMediator> contractMediatorsDictionary = 
+            new Dictionary<Type, RMediator>();
+        private readonly Dictionary<Type, IRModel> modelsDictionary = 
+            new Dictionary<Type, IRModel>();
+
+        private static readonly Dictionary<Type, RFacade> activeFacades = 
+            new Dictionary<Type, RFacade>();
+        private static readonly HashSet<Type> pendingFacades = 
+            new HashSet<Type>();
+
+        public static void Create<TFacade>(IRAppShell? appShell = null)
+            where TFacade : RFacade, new()
+        {
+            var facadeConcreteType = typeof(TFacade);
+
+            lock (registryGate)
             {
-                throw new ArgumentNullException(nameof(facadeConcreteType), "The facadeConcreteType cannot be null.");
+                if (activeFacades.ContainsKey(facadeConcreteType) || !pendingFacades.Add(facadeConcreteType))
+                    throw new InvalidOperationException(
+                        $"Facade '{facadeConcreteType.FullName}' already exists or is currently being created.");
             }
 
-            if (activeFacades.ContainsKey(facadeConcreteType)) 
+            try
             {
-                throw new InvalidOperationException($"Could not instantiate: {facadeConcreteType}. It may already have been created.");
-            }
-
-            try 
-            {
-                pendingFacades.Add(facadeConcreteType);
-                
-                var facade = Activator.CreateInstance(facadeConcreteType) as RFacade;
-
-                if (facade == null) 
-                {
-                    throw new InvalidOperationException("Failed to create an instance of the facade.");
-                }
-
-                activeFacades.Add(facadeConcreteType, facade);
-
-                if (promoterType != null && facadeConcreteType.Equals(promoterType)) 
-                {
-                    promoterFacade = facade;
-                }
-                else if (promoterFacade == null) {
-                    promoterFacade = facade;
-                }
-
-                if (AppShell == null) 
-                {
-                    AppShell = appShell;
-                }
-
-                facade.rCommander = new RCommander(facade);
+                var facade = new TFacade();
 
                 var models = facade.RegisterModels();
 
                 foreach (IRModel model in models)
                 {
-                    facade.modelsDictionary.Add(model.GetType(), model);
+                    var modelType = model.GetType();
+
+                    if (facade.modelsDictionary.ContainsKey(modelType))
+                    {
+                        throw new InvalidOperationException(
+                            $"Facade '{facadeConcreteType.FullName}' registers model " +
+                            $"'{modelType.FullName}' more than once.");
+                    }
+
+                    facade.modelsDictionary.Add(modelType, model);
 
                     if (model is RModel rModel)
-                    {
-                        rModel.rCommander = facade.rCommander;
-                    }
+                        rModel.Facade = facade;
                 }
 
                 var mediators = facade.RegisterMediators();
-                
-                foreach (RMediator mediator in mediators) 
+
+                foreach (RMediator mediator in mediators)
                 {
-                    facade.mediatorsDictionary.Add(mediator.GetType(), mediator);
-                    mediator.rCommander = facade.rCommander;
+                    var mediatorType = mediator.GetType();
+
+                    if (facade.mediatorsDictionary.ContainsKey(mediatorType))
+                    {
+                        throw new InvalidOperationException(
+                            $"Facade '{facadeConcreteType.FullName}' registers mediator " +
+                            $"'{mediatorType.FullName}' more than once.");
+                    }
+
+                    var contractType = mediator.ActorContractType;
+                    ValidateContractType(contractType);
+
+                    if (facade.contractMediatorsDictionary.TryGetValue(
+                        contractType, 
+                        out var existingMediator))
+                    {
+                        throw new InvalidOperationException(
+                            $"Facade '{facadeConcreteType.FullName}' registers contract '{contractType.FullName}' " +
+                            $"with both '{existingMediator.GetType().FullName}' and '{mediator.GetType().FullName}'.");
+                    }
+
+                    facade.mediatorsDictionary.Add(mediatorType, mediator);
+                    facade.contractMediatorsDictionary.Add(contractType, mediator);
+
+                    mediator.Facade = facade;
                 }
 
                 RCommandBase startupCommand = facade.RegisterStartupCommand();
 
-                if (startupCommand != null) 
+                // Publish only fully registered Facades. Never call application code under this lock.
+                lock (registryGate)
                 {
-                    facade.ExecuteCommand(startupCommand);
+                    activeFacades.Add(facadeConcreteType, facade);
+
+                    if (promoterType == facadeConcreteType || promoterFacade == null)
+                        promoterFacade = facade;
+
+                    if (RFacade.appShell == null)
+                        RFacade.appShell = appShell;
                 }
 
-                Log($"Facade execution completed: {facadeConcreteType?.Name}.");
+                facade.Execute(startupCommand);
+
+                Log($"FACADE CREATED: facade={facadeConcreteType.FullName}; startupDispatched=true.");
             }
-            catch (Exception ex) 
+            catch (Exception ex)
             {
-                pendingFacades.Remove(facadeConcreteType);
-                Log($"Cannot instantiate Facade instance. Error: {ex.Message}");
+                Log($"FACADE CREATION ERROR: facade={facadeConcreteType.FullName}; {ex}");
+
                 throw;
             }
+            finally
+            {
+                lock (registryGate) 
+                    pendingFacades.Remove(facadeConcreteType);
+            }
         }
 
-        public static void RegisterActor(IRContract view) 
+        // Resolve the exact declared contract; inherited contracts are separate registrations.
+        public static void RegisterActor<TActor>(IRContract actor)
+            where TActor : class, IRContract
         {
-            RMediator? foundMediator = null;
-
-            foreach (var facade in activeFacades.Values) 
-            {
-                if (facade is null || facade.mediatorsDictionary is null)
-                    continue;
-
-                foreach (var mediator in facade.mediatorsDictionary.Values) 
-                {
-                    if (mediator.viewBaseType.IsAssignableFrom(view.GetType())) {
-                        foundMediator = mediator;
-
-                        // assuming aggressive re-registering can be forgiven:
-                        if (mediator.viewBase == view) {
-                            return;
-                        }
-                        break;
-                    }
-                }
-                if (foundMediator != null)
-                    break;
-            }
-
-            if (foundMediator == null) 
-            {
-                //Log("Mediator is null: " + view);
-                return; // Windows Forms Designer bug.
-            }
-
-            foundMediator.UpdateViewBase(view);
-
-            Log("Registered mediator + view: " + foundMediator.GetType().Name + " | " + view.GetType().Name);
+            ValidateActor<TActor>(actor);
+            RegisterActorInternal(FindContractMediator(typeof(TActor)), actor);
         }
 
-        public static void UnregisterActor(IRContract view) 
+        public static void RegisterActor<TFacade, TActor>(IRContract actor)
+            where TFacade : RFacade
+            where TActor : class, IRContract
         {
-            RMediator? foundMediator = null;
+            ValidateActor<TActor>(actor);
+            RegisterActorInternal(FindContractMediator(typeof(TFacade), typeof(TActor)), actor);
+        }
 
-            foreach (var facade in activeFacades.Values) {
-                
-                if (facade is null || facade.mediatorsDictionary is null)
-                    continue;
+        public static void UnregisterActor<TActor>(IRContract actor)
+            where TActor : class, IRContract
+        {
+            ValidateActor<TActor>(actor);
+            UnregisterActorInternal(FindContractMediator(typeof(TActor)), actor);
+        }
 
-                foreach (var mediator in facade.mediatorsDictionary.Values) 
+        public static void UnregisterActor<TFacade, TActor>(IRContract actor)
+            where TFacade : RFacade
+            where TActor : class, IRContract
+        {
+            ValidateActor<TActor>(actor);
+            UnregisterActorInternal(FindContractMediator(typeof(TFacade), typeof(TActor)), actor);
+        }
+
+        private static void ValidateActor<TActor>(IRContract actor)
+            where TActor : class, IRContract
+        {
+            var contractType = typeof(TActor);
+            ValidateContractType(contractType);
+
+            if (!contractType.IsInstanceOfType(actor))
+            {
+                throw new ArgumentException(
+                    $"Actor '{actor.GetType().FullName}' does not implement " +
+                    $"the requested contract '{contractType.FullName}'.",
+                    nameof(actor));
+            }
+        }
+
+        private static RMediator? FindContractMediator(Type contractType)
+        {
+            lock (registryGate)
+            {
+                ValidateContractType(contractType);
+
+                RMediator? result = null;
+                Type? ownerType = null;
+
+                foreach (var entry in activeFacades)
                 {
-                    if (mediator.viewBaseType.IsAssignableFrom(view.GetType())) 
+                    if (!entry.Value.contractMediatorsDictionary.TryGetValue(
+                        contractType,
+                        out var mediator))
+                        continue;
+
+                    if (result != null)
                     {
-                        foundMediator = mediator;
-
-                        if (foundMediator.viewBase == null) 
-                        {
-                            return;
-                        }
+                        throw new InvalidOperationException(
+                            $"Contract '{contractType.FullName}' is registered by Facades '{ownerType?.FullName}' " +
+                            $"and '{entry.Key.FullName}'. Specify the Facade type when registering or unregistering the actor.");
                     }
 
-                    if (foundMediator != null)
-                        break;
+                    result = mediator;
+                    ownerType = entry.Key;
+                }
+                return result;
+            }
+        }
 
+        private static RMediator? FindContractMediator(Type facadeType, Type contractType)
+        {
+            lock (registryGate)
+            {
+                ValidateContractType(contractType);
+
+                if (activeFacades.TryGetValue(facadeType, out var facade) &&
+                    facade.contractMediatorsDictionary.TryGetValue(
+                        contractType,
+                        out var mediator))
+                    return mediator;
+
+                return null;
+            }
+        }
+
+        private static void ValidateContractType(Type contractType)
+        {
+            if (!contractType.IsInterface)
+            {
+                throw new ArgumentException(
+                    $"Actor contract '{contractType.FullName}' must be an interface extending IRContract. " +
+                    "Specify the contract interface explicitly, for example RegisterActor<IMyView>(view) " +
+                    "or UnregisterActor<IMyView>(view).");
+            }
+        }
+
+        private static void RegisterActorInternal(RMediator? mediator, IRContract actor)
+        {
+            if (mediator == null || ReferenceEquals(mediator.ActorBase, actor))
+                return;
+
+            mediator.UpdateActorBase(actor);
+
+            Log($"ACTOR REGISTERED: mediator={mediator.GetType().FullName}; contract={mediator.ActorContractType.FullName}; actor={actor.GetType().FullName}.");
+        }
+
+        private static void UnregisterActorInternal(RMediator? mediator, IRContract actor)
+        {
+            if (mediator == null || !ReferenceEquals(mediator.ActorBase, actor))
+                return;
+
+            mediator.RemoveActorBase();
+
+            Log($"ACTOR UNREGISTERED: mediator={mediator.GetType().FullName}; contract={mediator.ActorContractType.FullName}; actor={actor.GetType().FullName}.");
+        }
+
+        public static void Configure(Type? promoterType = null)
+        {
+            lock (registryGate)
+            {
+                if (hasBeenConfigured)
+                    throw new InvalidOperationException(
+                        "RFacade.Configure() can only be called once.");
+
+                if (activeFacades.Count > 0 || pendingFacades.Count > 0)
+                    throw new InvalidOperationException(
+                        "RFacade.Configure() must be called before any Facade creation begins.");
+
+                if (promoterType != null &&
+                    (!typeof(RFacade).IsAssignableFrom(promoterType) ||
+                     promoterType.IsAbstract))
+                {
+                    throw new ArgumentException(
+                        "The promoter type must be a concrete RFacade type.",
+                        nameof(promoterType));
                 }
 
-                if (foundMediator != null)
-                    break;
+                RFacade.promoterType = promoterType;
+                hasBeenConfigured = true;
             }
-
-            if (foundMediator == null) 
-            {
-                //Log("Mediator is null: " + view);
-                return; // Windows Forms Designer bug.
-            }
-
-            Log("Unregistered mediator + view: " + foundMediator.GetType().Name + " | " + view.GetType().Name);
-        }
-        public static void Configure(Type? promoterType = null) 
-        {
-            if (hasBeenConfigured)
-            {
-                Error("RFacade.Configure(...) should only be called once at the start of the application's life.");
-            }
-
-            RFacade.promoterType = promoterType;
-            hasBeenConfigured = true;
         }
 
-        public static void Log(object? logMessage) 
+        internal static void Log(object? logMessage)
         {
             if (!EnableDebugMode)
                 return;
@@ -204,11 +296,118 @@ namespace RMVC
             Console.WriteLine($"{logMessage}");
         }
 
-        public void AbortAllCommands() 
+        public void AbortAllCommands()
         {
-            foreach (var cancellationSource in activeTasks.Values) 
+            CancellationTokenSource[] operations;
+
+            lock (operationGate)
             {
-                cancellationSource.Cancel();
+                operations = new CancellationTokenSource[activeOperations.Count];
+                activeOperations.Keys.CopyTo(operations, 0);
+            }
+
+            foreach (var source in operations)
+            {
+                try 
+                { 
+                    source.Cancel(); 
+                }
+                catch (ObjectDisposedException)
+                {
+                    // The operation finished after the Abort snapshot was taken.
+                }
+                catch (AggregateException ex)
+                {
+                    // A throwing cancellation callback must not prevent other workers being cancelled.
+                    Log($"CANCELLATION CALLBACK ERROR: {ex}");
+                }
+            }
+        }
+
+        private static bool TryRegisterOperation(CancellationTokenSource source, RTracker tracker)
+        {
+            var commandType = tracker.Command.GetType();
+
+            // Evaluate application overrides outside the framework lock.
+            var allowConcurrentRoots = tracker.Command.AllowConcurrentRoots;
+            int activeCount;
+            
+            lock (operationGate)
+            {
+                if (!allowConcurrentRoots)
+                {
+                    foreach (var active in activeOperations.Values)
+                    {
+                        if (ReferenceEquals(active.Facade, tracker.Facade) &&
+                            active.Command.GetType() == commandType)
+                            return false;
+                    }
+                }
+
+                activeOperations.Add(source, tracker);
+                activeCount = activeOperations.Count;
+
+                if (activeOperations.Count == 1)
+                    operationNotifications.Enqueue(true);
+
+            }
+            if (activeCount > 1)
+                Log($"ROOTS CONCURRENT: activeCount={activeCount}.");
+
+            DeliverOperationNotifications();
+
+            return true;
+        }
+
+        private static void UnregisterOperation(CancellationTokenSource source)
+        {
+            lock (operationGate)
+            {
+                if (activeOperations.Remove(source) && activeOperations.Count == 0)
+                    operationNotifications.Enqueue(false);
+            }
+
+            DeliverOperationNotifications();
+        }
+
+        private static void DeliverOperationNotifications()
+        {
+            lock (operationGate)
+            {
+                if (deliveringOperationNotifications || operationNotifications.Count == 0)
+                    return;
+
+                deliveringOperationNotifications = true;
+            }
+
+            while (true)
+            {
+                bool started;
+
+                lock (operationGate)
+                {
+                    if (operationNotifications.Count == 0)
+                    {
+                        deliveringOperationNotifications = false;
+                        return;
+                    }
+                    started = operationNotifications.Dequeue();
+                }
+
+                // Serialise notifications, but never call application code under the tracking lock.
+                try
+                {
+                    var shell = AppShell;
+
+                    if (started)
+                        shell?.HandleOperationsStarted();
+                    else
+                        shell?.HandleOperationsCompleted();
+                }
+                catch (Exception ex)
+                {
+                    Log($"OPERATION NOTIFICATION ERROR: started={started}; {ex}");
+                }
             }
         }
 
@@ -238,221 +437,210 @@ namespace RMVC
             return null;
         }
 
-        internal void ExecuteCommand(RCommandBase command)
+        internal void Execute(RCommandBase command, string? dispatchSource = null)
         {
-            ExecuteCommand(command, null);
+            command.ClaimExecution();
+
+            // Models and mediators dispatch roots; commands execute children directly.
+            _ = DispatchCommandAsync(command, dispatchSource);
         }
 
-        internal void ExecuteCommand(
+        internal Task Execute(
             RCommandBase command,
-            RTracker? rTracker = null,
-            double percentCap = 100d)
+            RTracker tracker)
         {
-            percentCap = RHelper.ClampPercent(percentCap);
-
-            command.ExecuteUntypedInternal(
-                this,
-                rTracker,
-                percentCap);
+            return command.ExecuteUntypedInternal(tracker);
         }
 
-        internal TResult ExecuteCommand<TResult>(
-            RCommand<TResult> command)
+        internal Task<TResult> Execute<TResult>(
+            RCommand<TResult> command,
+            RTracker tracker)
         {
-            return command.RunInternal(this);
+            return command.RunInternal(tracker);
         }
 
-        internal async Task ExecuteCommandAsync(
-            RCommandAsync asyncCommand,
-            RTracker? rTracker,
-            double percentCap)
+        private async Task DispatchCommandAsync(RCommandBase command, string? dispatchSource)
         {
-            await ExecuteCommandAsyncCore(
-                asyncCommand,
-                rTracker,
-                percentCap,
-                tracker => asyncCommand.RunInternalAsync(tracker));
-        }
-
-        internal async Task<TResult> ExecuteCommandAsync<TResult>(
-            RCommandAsync<TResult> asyncCommand,
-            RTracker? rTracker,
-            double percentCap)
-        {
-            TResult result = default!;
-
-            await ExecuteCommandAsyncCore(
-                asyncCommand,
-                rTracker,
-                percentCap,
-                async tracker =>
-                {
-                    result = await asyncCommand.RunInternalAsync(tracker);
-                });
-
-            return result;
-        }
-
-        private async Task ExecuteCommandAsyncCore(
-            RCommandAsyncBase asyncCommand,
-            RTracker? rTracker,
-            double percentCap,
-            Func<RTracker, Task> runCommandAsync)
-        {
-            if (!asyncCommand.hasParent && !activeTasks.IsEmpty && asyncCommand.EnableAutoUpdate)
+            using (var source = new CancellationTokenSource())
             {
-                Error("Cannot execute more than one top-level Async Command at a time.");
-                return;
-            }
+                var tracker = new RTracker(command, this, 100d, source.Token);
 
-            var cancellationTokenSource = rTracker != null
-                ? CancellationTokenSource.CreateLinkedTokenSource(rTracker.Token)
-                : new CancellationTokenSource();
+                bool admitted;
 
-            RTracker activeTracker = rTracker
-                ?? new RTracker(
-                    asyncCommand,
-                    this,
-                    percentCap,
-                    cancellationTokenSource.Token);
-
-            var task = Task.Run(async () =>
-            {
                 try
                 {
-                    await runCommandAsync(activeTracker);
+                    admitted = TryRegisterOperation(source, tracker);
                 }
                 catch (Exception ex)
                 {
-                    Log("ERROR CAUGHT in async command: " + ex.ToString());
-                    asyncCommand.SetErrorInternal("RFacade Async Execution Error.");
+                    try
+                    {
+                        Log(
+                            $"ROOT ADMISSION ERROR: command={command.GetType().FullName}; " +
+                            $"facade={GetType().FullName}; tracker={tracker.Id}; " +
+                            $"chain={tracker.ChainId}; source={dispatchSource ?? "facade"}; {ex}");
+                    }
+                    finally
+                    {
+                        UnregisterOperation(source);
+                    }
+
+                    return;
                 }
-            }, cancellationTokenSource.Token);
 
-            // Track only top-level async commands
-            if (!asyncCommand.hasParent && !activeTasks.ContainsKey(task))
-            {
-                activeTasks[task] = cancellationTokenSource;
-            }
-
-            try
-            {
-                await task;
-            }
-            finally
-            {
-                if (!asyncCommand.hasParent && activeTasks.ContainsKey(task))
+                if (!admitted)
                 {
-                    HandleTaskComplete(asyncCommand);
-                    activeTasks.TryRemove(task, out _);
-                    Log($"Active tasks: {activeTasks.Count}");
+                    Log(
+                        $"ROOT REJECTED: command={command.GetType().FullName}; " +
+                        $"facade={GetType().FullName}; tracker={tracker.Id}; chain={tracker.ChainId}; source={dispatchSource ?? "facade"}; " +
+                        "another root instance is already active.");
+
+                    return;
+                }
+
+                try
+                {
+                    // Only roots are scheduled; awaited children execute directly within the chain.
+                    await Task.Run(async () =>
+                    {
+                        try
+                        {
+                            if (EnableDebugMode)
+                                Log($"ROOT START: command={command.GetType().FullName}; source={dispatchSource ?? "facade"}; tracker={tracker.Id}; chain={tracker.ChainId}; facade={GetType().FullName}; thread={Environment.CurrentManagedThreadId}.");
+
+                            await command.ExecuteUntypedInternal(tracker).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            Log($"ROOT EXECUTION ERROR: command={command.GetType().FullName}; tracker={tracker.Id}; chain={tracker.ChainId}; facade={GetType().FullName}; {ex}");
+
+                            command.SetErrorInternal("RFacade Execution Error.", ex.ToString());
+                        }
+                    }).ConfigureAwait(false);
+                }
+                finally
+                {
+                    try
+                    {
+                        await HandleRootComplete(command).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        command.SetErrorInternal(ex.Message, ex.ToString());
+
+                        Log(
+                            $"ROOT COMPLETION ERROR: command={command.GetType().FullName}; " +
+                            $"tracker={tracker.Id}; chain={tracker.ChainId}; facade={GetType().FullName}; {ex}");
+                    }
+                    finally
+                    {
+                        if (EnableDebugMode)
+                            Log($"ROOT END: command={command.GetType().FullName}; tracker={tracker.Id}; chain={tracker.ChainId}; facade={GetType().FullName}; errorOrAbort={tracker.ErrorOrAbort}; error={tracker.GetLatestError()?.Message ?? string.Empty}; cancelled={tracker.Token.IsCancellationRequested}; thread={Environment.CurrentManagedThreadId}.");
+
+                        UnregisterOperation(source);
+                    }
                 }
             }
         }
+
+        // Every Facade provides its own startup command; promoter selection is independent.
         protected abstract RCommandBase RegisterStartupCommand();
         protected abstract RMediator[] RegisterMediators();
         protected abstract IRModel[] RegisterModels();
 
-        protected static TFacade? FacadeInstance<TFacade>() where TFacade : RFacade 
+        protected TMediator? Mediator<TMediator>()
+            where TMediator : RMediator
+            => ResolveMediator<TMediator>();
+
+        protected TModel? Model<TModel>()
+            where TModel : class, IRModel
+            => ResolveModel<TModel>();
+
+        private static RFacade? GetPromoter()
         {
-            if (activeFacades.TryGetValue(typeof(TFacade), out RFacade? facade)) 
-            {
-                return facade as TFacade;
-            }
-            else 
-                return null;
+            lock (registryGate)
+                return promoterFacade;
         }
 
-        protected TMediator? Mediator<TMediator>() where TMediator : RMediator 
+        private async Task HandleRootComplete(RCommandBase command)
         {
-            if (mediatorsDictionary.TryGetValue(typeof(TMediator), out RMediator? mediator)) 
+            await command.HandleCommandComplete().ConfigureAwait(false);
+
+            if (!command.HasParent &&
+                command.ReportsProgress &&
+                command.Tracker?.ProgressRequested == true)
             {
-                return mediator as TMediator;
-            }
-            else 
-                return null;
-        }
-
-        protected TModel? Model<TModel>() where TModel : class, IRModel 
-        {
-            if (modelsDictionary.TryGetValue(typeof(TModel), out IRModel? model)) 
-            {
-                return model as TModel;
-            }
-            else
-                return null;
-        }
-
-        protected static RFacade? GetPromoter() 
-        {
-            return promoterFacade;
-        }
-
-        private void HandleTaskComplete(RCommandAsyncBase command) 
-        {
-            command.HandleThreadExit();
-
-            if (!command.hasParent && command.EnableAutoUpdate) 
-            {
-                command.rTracker?.facade.HandleProgressComplete();
+                await command.Tracker.Facade.HandleProgressComplete(
+                    command.Tracker.ChainId).ConfigureAwait(false);
             }
         }
 
-        protected RFacade() 
+        protected RFacade()
         {
-            if (!pendingFacades.Contains(GetType()))
-            {
-                Fatal("Do not instantiate a Facade directly. Use the static Initialise() method.");
-            }
-            pendingFacades.Remove(GetType());
+            bool creationPending;
+
+            lock (registryGate) 
+                creationPending = pendingFacades.Contains(GetType());
+
+            if (!creationPending)
+                Fatal("Do not instantiate a Facade directly. Use RFacade.Create<TFacade>().");
         }
 
-
-        private void HandleProgressComplete() 
+        private async Task HandleProgressComplete(string chainId)
         {
-            if (promoterFacade == null) 
+            var promoter = GetPromoter();
+
+            if (promoter == null)
                 return;
-            
-            RCommandBase? cmd = promoterFacade.RegisterProgressCompleteCommand();
-            
+
+            RCommandBase? cmd = promoter.RegisterProgressCompleteCommand(chainId);
+
             if (cmd != null)
-                ExecuteCommand(cmd);
+                await promoter.ExecuteProgressCallback(cmd).ConfigureAwait(false);
+            
         }
 
-        internal void HandleProgressChange(RProgress[] progress) 
+        internal async Task HandleProgressChange(string chainId, RProgress[] progress)
         {
-            if ((DateTime.Now - lastProgressUpdateTime).TotalMilliseconds < 100)
-                return;
-            else
-                lastProgressUpdateTime = DateTime.Now;
+            var promoter = GetPromoter();
 
-            if (promoterFacade == null) 
+            if (promoter == null)
                 return;
-            
-            RCommandBase? cmd = promoterFacade.RegisterProgressUpdateCommand(progress);
-            
+
+            RCommandBase? cmd = promoter.RegisterProgressUpdateCommand(chainId, progress);
+
             if (cmd != null)
-                ExecuteCommand(cmd);
+                await promoter.ExecuteProgressCallback(cmd).ConfigureAwait(false);
         }
 
-        virtual protected RCommandBase? RegisterProgressUpdateCommand(RProgress[] progress) 
+        private async Task ExecuteProgressCallback(RCommandBase command)
         {
-            return null;
+            command.ClaimExecution();
+
+            command.IsProgressCallback = true;
+
+            // Execute inline; cleanup remains available after the reporting worker is aborted.
+            var tracker = new RTracker(command, this, 100d, CancellationToken.None);
+
+            await command.ExecuteUntypedInternal(tracker).ConfigureAwait(false);
+
+            if (tracker.ErrorOrAbort)
+                Log($"PROGRESS CALLBACK ERROR: command={command.GetType().FullName}; tracker={tracker.Id}; chain={tracker.ChainId}; facade={GetType().FullName}; error={tracker.GetLatestError()?.Message ?? string.Empty}.");
         }
 
-        virtual protected RCommandBase? RegisterProgressCompleteCommand() 
-        {
-            return null;
-        }
+        protected virtual RCommandBase? RegisterProgressUpdateCommand(
+            string chainId, RProgress[] progress)
+            => null;
+        
+        protected virtual RCommandBase? RegisterProgressCompleteCommand(
+            string chainId)
+            => null;
 
-        private static void Fatal(string message) 
-        {       
-            throw new Exception(message);
-        }
+        private static void Fatal(string message)
+            => throw new InvalidOperationException(message);
 
-        private static void Error(string message) 
-        {
-            Log("RMVC - ERROR: " + message);
-        }
+        // Currently unused.
+        private static void Error(string message)
+            => Log($"FACADE ERROR: message={message}");
     }
 }

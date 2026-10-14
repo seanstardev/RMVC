@@ -1,9 +1,11 @@
-﻿using RMVC;
+using System.Threading.Tasks;
+using RMVC;
+using RMVCApp.Sample.Core.Command;
 using static RMVCApp.Sample.Core.Shared.Enums;
 
 namespace RMVCApp.Sample.Core 
 {
-    internal class ShowViewCmd : RCommand 
+    internal class ShowViewCmd : RMVCAppCommandBase<RVoid>
     {
         private readonly ViewEnum viewEnum;
 
@@ -12,9 +14,11 @@ namespace RMVCApp.Sample.Core
             this.viewEnum = viewEnum;
         }
 
-        protected override void Run() 
+        protected override async Task<RVoid> Run() 
         {
-            RMVCAppFacade.Instance?.MainMediator?.ShowView(viewEnum);
+            base.MainMediator?.ShowView(viewEnum);
+
+            return await Complete();
         }
     }
 }

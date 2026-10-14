@@ -1,3 +1,5 @@
+#nullable enable
+
 using RMVCApp.Sample.Core;
 using RMVCApp.Sample.Core.Shared;
 using UnityEngine;
@@ -5,21 +7,24 @@ using static RMVCApp.Sample.Core.Shared.Enums;
 
 public class MainCanvasScript : MonoBehaviour, IMainView
 {
-    [SerializeField] private GameObject HomePanel;
-    [SerializeField] private GameObject CounterPanel;
-    [SerializeField] private GameObject WeatherPanel;
-    public void ShowView(Enums.ViewEnum viewEnum) {
+    [SerializeField] private GameObject HomePanel = null!;
+    [SerializeField] private GameObject CounterPanel = null!;
+    [SerializeField] private GameObject WeatherPanel = null!;
 
+    public void ShowView(Enums.ViewEnum viewEnum) 
+    {
         if (viewEnum == ViewEnum.None || viewEnum == ViewEnum.Progress)
             return;
 
-        UnityMainThreadDispatcher.Enqueue(() => {
+        UnityMainThreadDispatcher.Enqueue(() => 
+        {
             HomePanel.SetActive(false);
             CounterPanel.SetActive(false);
             WeatherPanel.SetActive(false);
 
             // Activate the selected panel
-            switch (viewEnum) {
+            switch (viewEnum) 
+            {
                 case Enums.ViewEnum.Home:
                     HomePanel.SetActive(true);
                     break;
@@ -33,14 +38,18 @@ public class MainCanvasScript : MonoBehaviour, IMainView
         });
     }
 
-    private void Awake() {
+    private void Awake() 
+    {
         ShowView(Enums.ViewEnum.Home);
     }
 
-    void Start() {
-        RMVCAppFacade.RegisterActor(this);
+    void Start() 
+    {
+        RMVCAppFacade.RegisterActor<IMainView>(this);
     }
-    private void OnDestroy() {
-        RMVCAppFacade.UnregisterActor(this);
+    
+    private void OnDestroy() 
+    {
+        RMVCAppFacade.UnregisterActor<IMainView>(this);
     }
 }

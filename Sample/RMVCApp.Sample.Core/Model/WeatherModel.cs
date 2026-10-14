@@ -20,7 +20,6 @@ namespace RMVCApp.Sample.Core
                     startDate.AddDays(index),
                     _random.Next(-20, 55), // Use _random instance for random number generation
                     summaries[_random.Next(summaries.Length)])).ToArray();
-
         }
     }
 }

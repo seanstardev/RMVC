@@ -1,12 +1,16 @@
-﻿using RMVC;
+using System.Threading.Tasks;
+using RMVC;
+using RMVCApp.Sample.Core.Command;
 
 namespace RMVCApp.Sample.Core
 {
-    internal class AbortProgressCmd : RCommand 
+    internal class AbortProgressCmd : RMVCAppCommandBase<RVoid>
     {
-        protected override void Run() 
+        protected override async Task<RVoid> Run()
         {
-            RMVCAppFacade.Instance?.AbortAllCommands();
+            base.AbortAllCommands();
+
+            return await Complete();
         }
     }
 }

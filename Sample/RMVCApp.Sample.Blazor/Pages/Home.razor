@@ -74,21 +74,27 @@
     public event Action<string>? ShowRmvcMessageEvt;
     public event Action? RunRmvcProgressTestEvt;
 
-    protected override void OnInitialized() {
-        RMVCAppFacade.RegisterActor(this);
+    protected override void OnInitialized() 
+    {
+        RMVCAppFacade.RegisterActor<IHomeView>(this);
     }
-    public void Dispose() {
-        RMVCAppFacade.UnregisterActor(this);
+    public void Dispose() 
+    {
+        RMVCAppFacade.UnregisterActor<IHomeView>(this);
     }
 
-    public void SetView() {
+    public void SetView()
+    {
+        
     }
-    private void OnRmvcMessageClick() {
+
+    private void OnRmvcMessageClick() 
+    {
         ShowRmvcMessageEvt?.Invoke("Hello from RMVC.");
     }
-    private void OnRmvcProgressClick() {
 
-        Debug.WriteLine("OK... click...prog...");
+    private void OnRmvcProgressClick() 
+    {
         RunRmvcProgressTestEvt?.Invoke();
     }
 }

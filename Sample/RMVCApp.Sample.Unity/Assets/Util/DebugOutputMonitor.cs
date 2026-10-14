@@ -1,4 +1,6 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -9,11 +11,11 @@ namespace Assets.Util {
     internal class DebugOutputMonitor : System.IO.TextWriter {
         public DebugOutputMonitor() { 
         }
-        public override void WriteLine(string message) {
+        public override void WriteLine(string? message) {
             Debug.Log(message);
         }
 
-        public override void Write(string message) {
+        public override void Write(string? message) {
             Debug.Log(message);
         }
 

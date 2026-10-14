@@ -1,48 +1,42 @@
 ﻿using RMVC;
 using RMVCApp.Sample.Core.Shared;
-using System;
 
 namespace RMVCApp.Sample.Core 
 {
-    internal class NavigationMediator : RMediator 
+    internal class NavigationMediator : RMediator<INavigationView>
     {
-        private INavigationView? view => (INavigationView?)base.viewBase;
-
-        public NavigationMediator(Type view) : base(view) 
+        protected override void Initialised() 
         {
-        }
-
-        protected override void Initialsed() 
-        {
-            if (view != null) {
-                view.ShowHomeViewEvt += OnShowHome;
-                view.ShowCounterViewEvt += OnShowCounter;
-                view.ShowWeatherViewEvt += OnShowWeather;
+            if (actor != null) {
+                actor.ShowHomeViewEvt += OnShowHome;
+                actor.ShowCounterViewEvt += OnShowCounter;
+                actor.ShowWeatherViewEvt += OnShowWeather;
             }
         }
 
         protected override void Disposing() 
         {
-            if (view != null) 
+            if (actor != null) 
             {
-                view.ShowHomeViewEvt -= OnShowHome;
-                view.ShowCounterViewEvt -= OnShowCounter;
-                view.ShowWeatherViewEvt -= OnShowWeather;
+                actor.ShowHomeViewEvt -= OnShowHome;
+                actor.ShowCounterViewEvt -= OnShowCounter;
+                actor.ShowWeatherViewEvt -= OnShowWeather;
             }
         }
 
         private void OnShowHome() 
         {
-            base.ExecuteCommand(new ShowViewCmd(Enums.ViewEnum.Home));
+            base.Execute(new ShowViewCmd(Enums.ViewEnum.Home));
         }
 
         private void OnShowCounter() 
         {
-            base.ExecuteCommand(new ShowViewCmd(Enums.ViewEnum.Counter));
+            base.Execute(new ShowViewCmd(Enums.ViewEnum.Counter));
         }
+
         private void OnShowWeather() 
         {
-            base.ExecuteCommand(new ShowViewCmd(Enums.ViewEnum.Weather));
+            base.Execute(new ShowViewCmd(Enums.ViewEnum.Weather));
         }
     }
 }

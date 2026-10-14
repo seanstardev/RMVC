@@ -1,24 +1,18 @@
 ﻿using RMVC;
 using RMVCApp.Sample.Core.Shared;
-using System;
 
 namespace RMVCApp.Sample.Core 
 {
-    internal class WeatherMediator : RMediator 
+    internal class WeatherMediator : RMediator<IWeatherView>
     {
-        private IWeatherView? view => (IWeatherView?)base.viewBase;
-        public WeatherMediator(Type view) : base(view) 
-        { 
-        }
-
         public void SetView(WeatherForecastDTO[]? forecasts) 
         {
-            view?.SetView(forecasts);
+            actor?.SetView(forecasts);
         }
 
-        protected override void Initialsed() 
+        protected override void Initialised() 
         {
-            base.ExecuteCommand(new SetWeatherViewCmd());
+            base.Execute(new SetWeatherViewCmd());
         }
         protected override void Disposing() 
         {

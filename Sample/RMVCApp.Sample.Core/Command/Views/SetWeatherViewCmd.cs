@@ -1,13 +1,17 @@
-﻿using RMVC;
+using System.Threading.Tasks;
+using RMVC;
+using RMVCApp.Sample.Core.Command;
 
 namespace RMVCApp.Sample.Core 
 {
-    internal class SetWeatherViewCmd : RCommand 
+    internal class SetWeatherViewCmd : RMVCAppCommandBase<RVoid>
     {
-        protected override void Run() 
+        protected override async Task<RVoid> Run() 
         {
-            RMVCAppFacade.Instance?.WeatherMediator?.SetView(
-                RMVCAppFacade.Instance?.WeatherModel?.forecasts ?? null);
+            base.WeatherMediator?.SetView(
+                base.WeatherModel?.forecasts ?? null);
+
+            return await Complete();
         }
     }
 }

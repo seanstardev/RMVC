@@ -1,5 +1,4 @@
 ﻿@page "/weather"
-@using System.Diagnostics
 @using RMVCApp.Sample.Core.Shared
 @implements IWeatherView
 @implements IDisposable
@@ -38,16 +37,22 @@ else {
 
     private WeatherForecastDTO[]? forecasts;
 
-    protected override async Task OnInitializedAsync() {
-        await Task.Delay(500);
-        RMVCAppFacade.RegisterActor(this);
+    protected override void OnInitialized()
+    {
+        RMVCAppFacade.RegisterActor<IWeatherView>(this);
     }
 
-    public void Dispose() {
-        RMVCAppFacade.UnregisterActor(this);
+    public void Dispose() 
+    {
+        RMVCAppFacade.UnregisterActor<IWeatherView>(this);
     }
 
-    public void SetView(WeatherForecastDTO[]? forecasts) {
-        this.forecasts = forecasts;
+    public void SetView(WeatherForecastDTO[]? forecasts)
+    {
+        _ = InvokeAsync(() =>
+        {
+            this.forecasts = forecasts;
+            StateHasChanged();
+        });
     }
 }

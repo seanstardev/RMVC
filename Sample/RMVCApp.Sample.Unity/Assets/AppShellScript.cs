@@ -1,30 +1,56 @@
+#nullable enable
+
 using Assets.Util;
 using RMVCApp.Sample.Core;
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 
 public class AppShell : MonoBehaviour, IAppShell
 {
-    [SerializeField] private MessageBoxScript MessageBox;
+    [SerializeField] private MessageBoxScript MessageBox = null!;
 
-    private void Awake() {
+    private readonly SemaphoreSlim messageBoxGate = new(1, 1);
+
+    private void Awake() 
+    {
         var gameObjects = UnityEngine.Object.FindObjectsByType<AppShell>(FindObjectsSortMode.None);
-        if (gameObjects.Length > 1) {
+        
+        if (gameObjects.Length > 1) 
+        {
             Destroy(gameObject); // Prevent duplicate persistent objects
             return;
         }
 
         DontDestroyOnLoad(gameObject);
         Console.SetOut(new DebugOutputMonitor());
-        RMVCAppFacade.Create(typeof(RMVCAppFacade), this);
-    }
-    public void SetAppEnabled(bool doEnable) {
-
+        UnityMainThreadDispatcher.Initialise();
+        RMVCAppFacade.Create<RMVCAppFacade>(this);
     }
 
-    public async Task<bool> ShowMessageBox(string title, string message, bool isYesNo) {
+    public async Task<bool> ShowMessageBox(string title, string message, bool isYesNo) 
+    {
+        await messageBoxGate.WaitAsync();
 
-        return await UnityMainThreadDispatcher.EnqueueAsync(() => MessageBox.Show(title, message, isYesNo));
+        try
+        {
+            return await UnityMainThreadDispatcher.EnqueueAsync(
+                () => MessageBox.Show(title, message, isYesNo));
+        }
+        finally
+        {
+            messageBoxGate.Release();
+        }
+    }
+
+    public void HandleOperationsStarted()
+    {
+
+    }
+
+    public void HandleOperationsCompleted()
+    {
+
     }
 }

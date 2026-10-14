@@ -1,13 +1,25 @@
-﻿using RMVC;
+using System.Threading.Tasks;
+using RMVC;
+using RMVCApp.Sample.Core.Command;
 
 namespace RMVCApp.Sample.Core 
 {
-    internal class SetProgressCompleteCmd : RCommand 
+    internal class SetProgressCompleteCmd : RMVCAppCommandBase<RVoid>
     {
-        protected override void Run() 
+        private string chainId;
+
+        public SetProgressCompleteCmd(string chainId)
         {
-            base.ExecuteCommand(new ShowViewCmd(Shared.Enums.ViewEnum.None));
-            RMVCAppFacade.Instance?.ProgressMediator?.ResetView();
+            this.chainId = chainId;
+        }
+
+        protected override async Task<RVoid> Run() 
+        {
+            await base.Execute(new ShowViewCmd(Shared.Enums.ViewEnum.None));
+
+            base.ProgressMediator?.ResetView();
+
+            return await Complete();
         }
     }
 }

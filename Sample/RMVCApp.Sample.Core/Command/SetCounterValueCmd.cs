@@ -1,8 +1,10 @@
-﻿using RMVC;
+using System.Threading.Tasks;
+using RMVC;
+using RMVCApp.Sample.Core.Command;
 
 namespace RMVCApp.Sample.Core 
 {
-    internal class SetCounterValueCmd : RCommand 
+    internal class SetCounterValueCmd : RMVCAppCommandBase<RVoid>
     {
         private readonly int counterCount;
 
@@ -11,12 +13,14 @@ namespace RMVCApp.Sample.Core
             this.counterCount = counterCount;
         }
 
-        protected override void Run() 
+        protected override async Task<RVoid> Run() 
         {
-            if (RMVCAppFacade.Instance?.CounterModel != null) 
+            if (base.CounterModel != null) 
             {
-                RMVCAppFacade.Instance.CounterModel.CounterCount = counterCount;
+                base.CounterModel.CounterCount = counterCount;
             }
+
+            return await Complete();
         }
     }
 }

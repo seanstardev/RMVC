@@ -1,17 +1,19 @@
-﻿using System;
+﻿#nullable enable
+
+using System;
 using System.Threading.Tasks;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
 public class MessageBoxScript : MonoBehaviour {
-    [SerializeField] private TMP_Text TitleText;
-    [SerializeField] private TMP_Text MessageText;
-    [SerializeField] private Button YesButton;    
-    [SerializeField] private Button NoButton;     
-    [SerializeField] private Button OkButton;     
+    [SerializeField] private TMP_Text TitleText = null!;
+    [SerializeField] private TMP_Text MessageText = null!;
+    [SerializeField] private Button YesButton = null!;    
+    [SerializeField] private Button NoButton = null!;     
+    [SerializeField] private Button OkButton = null!;     
 
-    private TaskCompletionSource<bool> _taskCompletionSource;
+    private TaskCompletionSource<bool>? _taskCompletionSource;
 
     // Initialize the message box
     public Task<bool> Show(string title, string message, bool isYesNo) {
@@ -26,7 +28,7 @@ public class MessageBoxScript : MonoBehaviour {
         OkButton.gameObject.SetActive(!isYesNo);
 
         // Prepare the TaskCompletionSource for async handling
-        _taskCompletionSource = new TaskCompletionSource<bool>();
+        _taskCompletionSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         // Attach listeners
         YesButton.onClick.AddListener(OnYesClicked);
@@ -64,6 +66,6 @@ public class MessageBoxScript : MonoBehaviour {
         gameObject.SetActive(false);
 
         // Complete the task
-        _taskCompletionSource?.SetResult(result);
+        _taskCompletionSource?.TrySetResult(result);
     }
 }

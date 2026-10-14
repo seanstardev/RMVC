@@ -1,6 +1,7 @@
-﻿namespace RMVC
+namespace RMVC
 {
     public interface IRModel
     {
+
     }
 }

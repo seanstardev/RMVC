@@ -8,7 +8,8 @@ using RMVCApp.Sample.Core.Shared;
 using RMVCApp.Sample.Core;
 
 namespace RMVCApp.Avalonia.ViewModels {
-    public partial class ProgressViewModel : ViewModelBase, IProgressView {
+    public partial class ProgressViewModel : ViewModelBase, IProgressView 
+    {
 
         public event Action? AbortProgressEvt;
 
@@ -20,19 +21,22 @@ namespace RMVCApp.Avalonia.ViewModels {
         public ProgressViewModel() { }
 
         [RelayCommand]
-        private void AbortProgress() {
+        private void AbortProgress() 
+        {
             AbortProgressEvt?.Invoke();
         }
 
-        public void ResetView() {
-            Dispatcher.UIThread.Post(() => {
+        public void ResetView() 
+        {
+            Dispatcher.UIThread.Post(() => 
+            {
                 ProgressItems.Clear();
                 UpdateHasProgressItems();
             });
         }
 
-        public void SetProgress(RProgress[] progress) {
-
+        public void SetProgress(RProgress[] progress) 
+        {
             // Ensure UI thread execution
             Dispatcher.UIThread.Post(() =>
             {
@@ -44,17 +48,19 @@ namespace RMVCApp.Avalonia.ViewModels {
             });
         }
 
-
-        private void UpdateHasProgressItems() {
+        private void UpdateHasProgressItems() 
+        {
             HasProgressItems = ProgressItems.Count > 0;
         }
 
-        protected internal override void OnViewDisposed() {
-            RMVCAppFacade.UnregisterActor(this);
+        protected internal override void OnViewDisposed() 
+        {
+            RMVCAppFacade.UnregisterActor<IProgressView>(this);
         }
 
-        protected internal override void OnViewInitialized() {
-            RMVCAppFacade.RegisterActor(this);
+        protected internal override void OnViewInitialized() 
+        {
+            RMVCAppFacade.RegisterActor<IProgressView>(this);
         }
     }
 }

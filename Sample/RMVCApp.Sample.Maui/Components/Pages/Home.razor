@@ -1,5 +1,4 @@
 ﻿@page "/"
-@using System.Diagnostics
 @using RMVCApp.Sample.Core.Shared
 @implements IHomeView
 @implements IDisposable
@@ -22,22 +21,27 @@
     public event Action<string>? ShowRmvcMessageEvt;
     public event Action? RunRmvcProgressTestEvt;
 
-    protected override void OnInitialized() {
-        RMVCAppFacade.RegisterActor(this);
+    protected override void OnInitialized() 
+    {
+        RMVCAppFacade.RegisterActor<IHomeView>(this);
     }
 
-    public void Dispose() {
-        RMVCAppFacade.UnregisterActor(this);
+    public void Dispose() 
+    {
+        RMVCAppFacade.UnregisterActor<IHomeView>(this);
     }
 
-    public void SetView() {
+    public void SetView() 
+    {
         // Add logic to set view here if needed
     }
 
-    private void OnRmvcMessageClick() {
+    private void OnRmvcMessageClick() 
+    {
         ShowRmvcMessageEvt?.Invoke("Hello from RMVC.");
     }
-    private void OnRmvcProgressClick() {
+    private void OnRmvcProgressClick() 
+    {
         RunRmvcProgressTestEvt?.Invoke();
     }
 }

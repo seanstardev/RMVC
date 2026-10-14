@@ -1,6 +1,4 @@
-﻿@using System.Runtime.InteropServices
-@using System.Diagnostics
-@using RMVCApp.Maui.Components
+﻿@using RMVCApp.Maui.Components
 @using RMVCApp.Sample.Core
 
 @inherits LayoutComponentBase
@@ -51,24 +49,21 @@
 
     protected override void OnInitialized()
     {
-        RMVCAppFacade.Create(typeof(RMVCAppFacade), this);
+        RMVCAppFacade.Create<RMVCAppFacade>(this);
         base.OnInitialized();
-    }
-
-    public void SetAppEnabled(bool doEnable)
-    {
     }
 
     public Task<bool> ShowMessageBox(string title, string message, bool isYesNo = false)
     {
-        if (Application.Current == null || Application.Current.MainPage == null)
-            return Task.FromResult(false);
-
         return MainThread.InvokeOnMainThreadAsync(async () =>
         {
+            var page = Application.Current?.MainPage;
+            if (page == null)
+                return false;
+
             if (isYesNo)
             {
-                return await Application.Current.MainPage.DisplayAlert(
+                return await page.DisplayAlert(
                     title,
                     message,
                     "Yes",
@@ -77,7 +72,7 @@
             }
             else
             {
-                await Application.Current.MainPage.DisplayAlert(
+                await page.DisplayAlert(
                     title,
                     message,
                     "OK"
@@ -89,5 +84,16 @@
 
     public void Dispose()
     {
+        
+    }
+
+    public void HandleOperationsStarted()
+    {
+
+    }
+
+    public void HandleOperationsCompleted()
+    {
+        
     }
 }

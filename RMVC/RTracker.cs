@@ -1,69 +1,81 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
+using System.Threading.Tasks;
 
-namespace RMVC 
+namespace RMVC
 {
-    internal class RTracker 
+    internal class RTracker
     {
-        internal string Id { get; private set; }
-        internal bool Abort { get { return _abort; } set { ApplyAbort(value); } }
-        internal string ErrorMessage { get; private set; } = string.Empty;
-        internal bool Error { get { return _error; } }
-        internal CancellationToken Token { get; private set; }
-        internal bool ErrorOrAbort { get { return _error || _abort; } }
-        internal RCommandAsyncBase _command;
-        internal RFacade facade;
-        internal RTracker? _parent;
+        internal string Id { get; }
+        internal string ChainId => GetRootRTracker().Id;
+        private readonly object errorGate = new object();
+        private readonly List<RErrorItem> errorItems = new List<RErrorItem>();
 
-        private readonly double _weightInParent;
-        private readonly bool _allowAutoUpdate;
+        internal bool Error
+        {
+            get
+            {
+                var root = GetRootRTracker();
 
-        private RTracker? _child;
+                lock (root.errorGate)
+                    return root.errorItems.Count > 0;
+            }
+        }
+        internal CancellationToken Token { get; }
+        internal bool ErrorOrAbort { get { return Error || Token.IsCancellationRequested; } }
+        internal RCommandBase Command { get; }
+        internal RFacade Facade { get; }
+        internal RTracker? Parent { get; private set; }
+        internal bool ProgressRequested => GetRootRTracker().progressRequested;
+        private const int ProgressUpdateIntervalMilliseconds = 100;
+        private readonly Stopwatch progressUpdateTimer = new Stopwatch();
+        private readonly double weightInParent;
+        private readonly bool reportsProgress;
+        private bool progressRequested;
 
-        private double _localPercent;
+        internal void RequestProgress()
+            => GetRootRTracker().progressRequested = true;
 
-        private string? _title;
-        private string? _text;
-        private bool _abort;
-        private bool _error;
+        private RTracker? child;
 
-        internal RTracker(RCommandAsyncBase command, RFacade facade, double weightInParent, CancellationToken cancellationToken) 
+        private double localPercent;
+        private const double ProgressOverflowTolerance = 0.000001;
+        private bool progressOverflowLogged;
+
+        private string? title;
+        private string? message;
+
+        internal RTracker(
+            RCommandBase command, 
+            RFacade facade, 
+            double weightInParent, 
+            CancellationToken cancellationToken)
         {
             Id = Guid.NewGuid().ToString();
-            _weightInParent = weightInParent;
-            _parent = null;
-            _child = null;
-            _localPercent = 0d;
-            _command = command;
-            _allowAutoUpdate = command.EnableAutoUpdate;
+            this.weightInParent = weightInParent;
+            Command = command;
+            reportsProgress = command.ReportsProgress;
 
-            this.facade = facade;
-            _text = null;
-            _title = null;
-            _abort = false;
-            _error = false;
+            Facade = facade;
             Token = cancellationToken;
         }
 
-        internal RProgress[] GetProgressReport() 
+        internal RProgress[] GetProgressReport()
         {
             List<RProgress> list = new List<RProgress>();
-            RTracker[] rTrackerSet = GetAllRTrackersFlat();
+            RTracker[] trackerPath = GetAllRTrackersFlat();
 
-            foreach (RTracker tracker in rTrackerSet) 
+            foreach (RTracker tracker in trackerPath)
             {
-                
-                //if (tracker != this && tracker._localPercent == 0) 
-                //    continue;
-
-                if (!tracker._allowAutoUpdate)
+                if (!tracker.reportsProgress)
                     continue;
 
                 list.Add(new RProgress(
-                    Convert.ToInt32(Math.Round(tracker._localPercent)), // Final rounding here for report
-                    tracker._text ?? string.Empty,
-                    tracker._title ?? string.Empty,
+                    Convert.ToInt32(Math.Round(tracker.localPercent)), // Final rounding here for report
+                    tracker.message ?? string.Empty,
+                    tracker.title ?? string.Empty,
                     tracker.Id
                 ));
             }
@@ -71,192 +83,173 @@ namespace RMVC
             return list.ToArray();
         }
 
-        internal void SetProgressTitle(string title) 
+        internal async Task SetProgressTitle(string title)
         {
-            _title = title;
-            SendProgress();
+            this.title = title;
+            await SendProgress();
         }
-        internal void SetProgress(string text)
+        internal async Task SetProgress(string text)
         {
             if (!string.IsNullOrWhiteSpace(text))
-                _text = text;
+                message = text;
 
-            SendProgress();
+            await SendProgress();
         }
 
-        internal void SetProgress(double percentComplete, string? text = null)
+        internal async Task SetProgress(
+            double percentComplete,
+            string? text = null,
+            bool forceReport = false)
         {
             percentComplete = RHelper.ClampPercent(percentComplete);
 
-            bool textChanged = false;
-
-            if (!string.IsNullOrWhiteSpace(text) && text != _text)
+            if (!string.IsNullOrWhiteSpace(text) && text != message)
+                message = text;
+            
+            if (percentComplete > localPercent)
             {
-                _text = text;
-                textChanged = true;
+                Log($"PROGRESS SET: command={Command.GetType().FullName}; tracker={Id}; chain={ChainId}; percent={percentComplete}; increment={percentComplete - localPercent}.");
+                await UpdatePercent(percentComplete - localPercent, forceReport);
             }
-
-            if (percentComplete > _localPercent)
-            {
-                Log($"Setting progress in {Id}: Local percent: {_localPercent}, Increment: {percentComplete - _localPercent}");
-                UpdatePercent(percentComplete - _localPercent);
-            }
-            else if (textChanged)
-            {
-                SendProgress();
-            }
+            else
+                await SendProgress(forceReport);
         }
 
-        internal void SetProgress(int percentComplete, string? text = null)
-        {
-            percentComplete = SanitizePercent(percentComplete);
-
-            SetProgress((double)percentComplete, text);
-        }
-
-        internal void SetProgress(int step, int total, string? text = null)
-        {
-            double adjusted = GetPercent(step, total);
-
-            SetProgress(adjusted, text);
-        }
-        internal void SetError(string errorMessage) 
+        internal void SetError(string errorMessage, string? exceptionDetails = null)
         {
             if (string.IsNullOrWhiteSpace(errorMessage))
                 errorMessage = "Unspecified Error.";
 
-            _error = true;
-            ErrorMessage = errorMessage;
-            RTracker[] arr = GetAllRTrackersFlat();
+            var root = GetRootRTracker();
 
-            foreach (RTracker item in arr) 
+            lock (root.errorGate)
             {
-                item._error = true;
-                item.ErrorMessage = ErrorMessage;
+                root.errorItems.Insert(0, new RErrorItem(
+                    errorMessage,
+                    Command.GetType().FullName ?? Command.Name,
+                    Id,
+                    root.Id,
+                    exceptionDetails));
             }
         }
 
-        internal RTracker CreateChild(RCommandAsyncBase command, double percentCap) 
+        internal IReadOnlyList<RErrorItem> GetErrors()
+        {
+            var root = GetRootRTracker();
+
+            lock (root.errorGate)
+                return Array.AsReadOnly(root.errorItems.ToArray());
+        }
+
+        internal RErrorItem? GetLatestError()
+        {
+            var root = GetRootRTracker();
+
+            lock (root.errorGate)
+                return root.errorItems.Count == 0 ? null : root.errorItems[0];
+        }
+
+        internal RTracker CreateChild(RCommandBase command, double percentCap)
         {
             percentCap = RHelper.ClampPercent(percentCap);  // Ensure cap is within bounds
-            Log($"Creating child tracker for {command.GetType().Name} with cap: {percentCap}");
-
-            _child = new RTracker(command, facade, percentCap /** (_weightInParent / 100d)*/, Token);
-            _child._parent = this;
-
-            return _child;
-        }
-
-        private void ApplyAbort(bool abort) 
-        {
-            if (!abort) 
-                return;
             
-            RTracker[] arr = GetAllRTrackersFlat();
+            Log($"CHILD ALLOCATED: command={command.GetType().FullName}; parent={Id}; chain={ChainId}; percentCap={percentCap}.");
 
-            foreach (RTracker item in arr) 
-            {
-                item._abort = abort;
-            }
+            child = new RTracker(command, Facade, percentCap, Token);
+            child.Parent = this;
+
+            return child;
         }
 
-        private RTracker[] GetAllRTrackersFlat() 
+        private RTracker[] GetAllRTrackersFlat()
         {
             List<RTracker> list = new List<RTracker>();
+
             RTracker rootRTracker = GetRootRTracker();
             list.Add(rootRTracker);
 
-            RTracker? child = rootRTracker._child;
-            while (child != null) 
+            RTracker? child = rootRTracker.child;
+
+            while (child != null)
             {
                 list.Add(child);
-                child = child._child;
+                child = child.child;
             }
 
             return list.ToArray();
         }
 
-        private void SendProgress() 
+        private async Task SendProgress(bool forceReport = false)
         {
-            if (_parent != null) 
+            if (!GetRootRTracker().progressRequested)
+                return;
+
+            if (Parent != null)
             {
-                _parent.SendProgress();
+                await Parent.SendProgress(forceReport);
                 return;
             }
 
+            // Only the root reaches here, so throttling is per chain.
+            if (!forceReport &&
+                progressUpdateTimer.IsRunning &&
+                progressUpdateTimer.ElapsedMilliseconds < ProgressUpdateIntervalMilliseconds)
+                return;
+
+            progressUpdateTimer.Restart();
+
             var progressSet = GetProgressReport();
 
-            if (progressSet.Length > 0) 
-            {
-                facade.HandleProgressChange(progressSet);
-            }
+            if (progressSet.Length > 0)
+                await Facade.HandleProgressChange(Id, progressSet).ConfigureAwait(false);
         }
 
-        private void UpdatePercent(double localPercentIncrement) 
-        {    
+        private async Task UpdatePercent(double localPercentIncrement, bool forceReport = false)
+        {
             // Accumulate local percent without rounding for internal accuracy
-            _localPercent += localPercentIncrement;
+            localPercent += localPercentIncrement;
 
-            Log($"Updating percent in {Id}: New local percent: {_localPercent}");
+            if (!progressOverflowLogged &&
+                localPercent > 100d + ProgressOverflowTolerance)
+            {
+                progressOverflowLogged = true;
 
-            if (_parent != null) 
+                Log(
+                    $"PROGRESS OVERFLOW: command={Command.GetType().FullName}; " +
+                    $"tracker={Id}; chain={ChainId}; accumulated={localPercent}%. " +
+                    "Check child percentage allocations and direct SetProgress() calls.");
+            }
+
+            Log($"PROGRESS ACCUMULATED: command={Command.GetType().FullName}; tracker={Id}; chain={ChainId}; percent={localPercent}.");
+
+            if (Parent != null)
             {
                 // Calculate parent increment proportionally based on this tracker's cap and apply it immediately
-                double parentIncrement = localPercentIncrement * (_weightInParent / 100d);
+                double parentIncrement = localPercentIncrement * (weightInParent / 100d);
 
                 // Propagate to parent with a fractional increment
-                _parent.UpdatePercent(parentIncrement);
+                await Parent.UpdatePercent(parentIncrement, forceReport);
 
-                Log($"Propagating to parent in {Id}: Local increment = {localPercentIncrement}, Parent increment = {parentIncrement}");
+                Log($"PROGRESS PROPAGATED: command={Command.GetType().FullName}; tracker={Id}; parent={Parent.Id}; chain={ChainId}; localIncrement={localPercentIncrement}; parentIncrement={parentIncrement}.");
             }
-            else 
+            else
             {
                 // At the root level, ensure rounding only when displaying to avoid losing small increments
-                SendProgress();
+                await SendProgress(forceReport);
             }
         }
 
-        private double GetPercent(int current, int total)
+        private RTracker GetRootRTracker()
         {
-            if (total <= 0)
-                return 0;
-
-            return RHelper.ClampPercent(
-                (current / (double)total) * 100d);
-        }
-        private int SanitizePercent(int percent) 
-        {
-            if (percent > 100) 
-                return 100;
-            else if (percent < 0) 
-                return 0;
-            else 
-                return percent;
-        }
-
-        private RTracker GetBaseRTracker() 
-        {
-            if (_child == null) 
+            if (Parent == null)
                 return this;
-            else 
-                return _child.GetBaseRTracker();
+            else
+                return Parent.GetRootRTracker();
         }
 
-        private RTracker GetRootRTracker() 
+        private void Log(string msg)
         {
-            if (_parent == null) 
-                return this;
-            else 
-                return _parent.GetRootRTracker();
-        }
-
-        private int ToInt(double val) 
-        {
-            return Convert.ToInt32(val);
-        }
-        private void Log(string msg) 
-        {
-            RFacade.Log("[RTracker] " + msg);
+            RFacade.Log(msg);
         }
     }
 }

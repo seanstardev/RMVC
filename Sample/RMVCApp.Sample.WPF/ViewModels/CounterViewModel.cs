@@ -2,39 +2,60 @@
 using RMVCApp.Sample.Core.Shared;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Windows;
 using System.Windows.Input;
 
 namespace RMVCApp.WPF.ViewModels
 {
-    public class CounterViewModel : INotifyPropertyChanged, IViewLifecycleAware, ICounterView {
+    public class CounterViewModel : INotifyPropertyChanged, IViewLifecycleAware, ICounterView 
+    {
+        public event Action<int>? SetCounterEvt;
+
         private int _count;
-        public int Count {
+        
+        public int Count 
+        {
             get => _count;
-            set { _count = value; OnPropertyChanged(); }
+            set 
+            { 
+                _count = value; 
+                OnPropertyChanged(); 
+            }
         }
 
         public ICommand IncrementCommand { get; }
 
-        public CounterViewModel() {
-            IncrementCommand = new RelayCommand(() => {
+        public CounterViewModel() 
+        {
+            IncrementCommand = new RelayCommand(() => 
+            {
                 Count++;
                 SetCounterEvt?.Invoke(Count);
             });
         }
-        public event Action<int>? SetCounterEvt;
+
         public event PropertyChangedEventHandler? PropertyChanged;
 
-        public void SetCounter(int count) {
-            Count = count;
-        }
-        public void OnInitialised() {
-            RMVCAppFacade.RegisterActor(this);
+        public void SetCounter(int count)
+        {
+            Application.Current.Dispatcher.BeginInvoke(() =>
+            {
+                Count = count;
+            });
         }
 
-        public void OnDisposed() {
-            RMVCAppFacade.UnregisterActor(this);
+        public void OnInitialised() 
+        {
+            RMVCAppFacade.RegisterActor<ICounterView>(this);
         }
-        protected void OnPropertyChanged([CallerMemberName] string? name = null) {
+
+        public void OnDisposed() 
+        {
+            RMVCAppFacade.UnregisterActor<ICounterView>(this);
+        }
+
+        protected void OnPropertyChanged([CallerMemberName] string? name = null) 
+        {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
         }
     }

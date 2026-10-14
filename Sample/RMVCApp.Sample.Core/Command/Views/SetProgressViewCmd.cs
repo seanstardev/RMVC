@@ -1,17 +1,17 @@
-﻿using RMVC;
+using System.Threading.Tasks;
+using RMVC;
+using RMVCApp.Sample.Core.Command;
 
 namespace RMVCApp.Sample.Core 
 {
-    internal class SetProgressViewCmd : RCommand 
+    internal class SetProgressViewCmd : RMVCAppCommandBase<RVoid>
     {
-        public SetProgressViewCmd() 
+        protected override async Task<RVoid> Run() 
         {
-        }
+            if (base.ProgressModel != null)
+                base.ProgressMediator?.SetView(base.ProgressModel.Progress);
 
-        protected override void Run() 
-        {
-            if (RMVCAppFacade.Instance?.ProgressModel != null)
-                RMVCAppFacade.Instance.ProgressMediator?.SetView(RMVCAppFacade.Instance.ProgressModel.Progress);
+            return await Complete();
         }
     }
 }

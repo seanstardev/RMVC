@@ -1,29 +1,35 @@
-﻿using RMVC;
+using System.Threading.Tasks;
+using RMVC;
+using RMVCApp.Sample.Core.Command;
 using System;
 using System.Diagnostics;
 
 namespace RMVCApp.Sample.Core 
 {
-    internal class SetProgressUpdateCmd : RCommand 
+    internal class SetProgressUpdateCmd : RMVCAppCommandBase<RVoid>
     {
         private readonly RProgress[] progress;
+        private string chainId;
 
-        public SetProgressUpdateCmd(RProgress[] progress) 
+        public SetProgressUpdateCmd(string chainId, RProgress[] progress)
         {
+            this.chainId = chainId;
             this.progress = progress;
         }
 
-        protected override void Run() 
+        protected override async Task<RVoid> Run() 
         {
             Debug.WriteLine($"{DateTime.Now} >>> Do update progress...");
 
-            if (RMVCAppFacade.Instance != null && RMVCAppFacade.Instance?.ProgressModel != null)
-                RMVCAppFacade.Instance.ProgressModel.Progress = progress;
+            if (base.ProgressModel != null)
+                base.ProgressModel.Progress = progress;
             
-            base.ExecuteCommand(new ShowViewCmd(Shared.Enums.ViewEnum.Progress));
-            base.ExecuteCommand(new SetProgressViewCmd());
+            await base.Execute(new ShowViewCmd(Shared.Enums.ViewEnum.Progress));
+            await base.Execute(new SetProgressViewCmd());
         
             ProgressDebug();
+
+            return await Complete();
         }
 
         private void ProgressDebug() 
