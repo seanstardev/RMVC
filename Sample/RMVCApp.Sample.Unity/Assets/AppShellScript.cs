@@ -1,4 +1,4 @@
-#nullable enable
+﻿#nullable enable
 
 using Assets.Util;
 using RMVCApp.Sample.Core;
@@ -27,6 +27,16 @@ public class AppShell : MonoBehaviour, IAppShell
         Console.SetOut(new DebugOutputMonitor());
         UnityMainThreadDispatcher.Initialise();
         RMVCAppFacade.Create<RMVCAppFacade>(this);
+    }
+
+    public void HandleInitialisationFailed(
+        string facadeName,
+        string message)
+    {
+        _ = ShowMessageBox(
+            "Initialisation failed",
+            facadeName + "\n\n" + message,
+            false);
     }
 
     public async Task<bool> ShowMessageBox(string title, string message, bool isYesNo) 

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
@@ -8,8 +8,8 @@ namespace RMVC
 {
     internal class RTracker
     {
-        internal string Id { get; }
-        internal string ChainId => GetRootRTracker().Id;
+        internal string CommandId { get; }
+        internal string CommandRootId => GetRootRTracker().CommandId;
         private readonly object errorGate = new object();
         private readonly List<RErrorItem> errorItems = new List<RErrorItem>();
 
@@ -53,7 +53,7 @@ namespace RMVC
             double weightInParent, 
             CancellationToken cancellationToken)
         {
-            Id = Guid.NewGuid().ToString();
+            CommandId = Guid.NewGuid().ToString();
             this.weightInParent = weightInParent;
             Command = command;
             reportsProgress = command.ReportsProgress;
@@ -76,7 +76,7 @@ namespace RMVC
                     Convert.ToInt32(Math.Round(tracker.localPercent)), // Final rounding here for report
                     tracker.message ?? string.Empty,
                     tracker.title ?? string.Empty,
-                    tracker.Id
+                    tracker.CommandId
                 ));
             }
 
@@ -108,7 +108,7 @@ namespace RMVC
             
             if (percentComplete > localPercent)
             {
-                Log($"PROGRESS SET: command={Command.GetType().FullName}; tracker={Id}; chain={ChainId}; percent={percentComplete}; increment={percentComplete - localPercent}.");
+                Log($"PROGRESS SET: command={Command.GetType().FullName}; commandId={CommandId}; commandRootId={CommandRootId}; percent={percentComplete}; increment={percentComplete - localPercent}.");
                 await UpdatePercent(percentComplete - localPercent, forceReport);
             }
             else
@@ -127,8 +127,8 @@ namespace RMVC
                 root.errorItems.Insert(0, new RErrorItem(
                     errorMessage,
                     Command.GetType().FullName ?? Command.Name,
-                    Id,
-                    root.Id,
+                    CommandId,
+                    root.CommandId,
                     exceptionDetails));
             }
         }
@@ -153,7 +153,7 @@ namespace RMVC
         {
             percentCap = RHelper.ClampPercent(percentCap);  // Ensure cap is within bounds
             
-            Log($"CHILD ALLOCATED: command={command.GetType().FullName}; parent={Id}; chain={ChainId}; percentCap={percentCap}.");
+            Log($"CHILD ALLOCATED: command={command.GetType().FullName}; commandParentId={CommandId}; commandRootId={CommandRootId}; percentCap={percentCap}.");
 
             child = new RTracker(command, Facade, percentCap, Token);
             child.Parent = this;
@@ -201,7 +201,7 @@ namespace RMVC
             var progressSet = GetProgressReport();
 
             if (progressSet.Length > 0)
-                await Facade.HandleProgressChange(Id, progressSet).ConfigureAwait(false);
+                await Facade.HandleProgressChange(CommandId, progressSet).ConfigureAwait(false);
         }
 
         private async Task UpdatePercent(double localPercentIncrement, bool forceReport = false)
@@ -216,11 +216,11 @@ namespace RMVC
 
                 Log(
                     $"PROGRESS OVERFLOW: command={Command.GetType().FullName}; " +
-                    $"tracker={Id}; chain={ChainId}; accumulated={localPercent}%. " +
+                    $"commandId={CommandId}; commandRootId={CommandRootId}; accumulated={localPercent}%. " +
                     "Check child percentage allocations and direct SetProgress() calls.");
             }
 
-            Log($"PROGRESS ACCUMULATED: command={Command.GetType().FullName}; tracker={Id}; chain={ChainId}; percent={localPercent}.");
+            Log($"PROGRESS ACCUMULATED: command={Command.GetType().FullName}; commandId={CommandId}; commandRootId={CommandRootId}; percent={localPercent}.");
 
             if (Parent != null)
             {
@@ -230,7 +230,7 @@ namespace RMVC
                 // Propagate to parent with a fractional increment
                 await Parent.UpdatePercent(parentIncrement, forceReport);
 
-                Log($"PROGRESS PROPAGATED: command={Command.GetType().FullName}; tracker={Id}; parent={Parent.Id}; chain={ChainId}; localIncrement={localPercentIncrement}; parentIncrement={parentIncrement}.");
+                Log($"PROGRESS PROPAGATED: command={Command.GetType().FullName}; commandId={CommandId}; commandParentId={Parent.CommandId}; commandRootId={CommandRootId}; localIncrement={localPercentIncrement}; parentIncrement={parentIncrement}.");
             }
             else
             {

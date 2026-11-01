@@ -27,22 +27,22 @@ namespace RMVCApp.Sample.Core
             };
         }
 
-        protected override RCommandBase RegisterStartupCommand() 
+        protected override RCommandBase RegisterInitialiseCommand(object? initialisation) 
         {
             return new StartupCmd();
         }
 
         protected override RCommandBase? RegisterProgressUpdateCommand(
-            string chainId, 
+            string commandRootId, 
             RProgress[] progress)
         {
-            return new SetProgressUpdateCmd(chainId, progress);
+            return new SetProgressUpdateCmd(commandRootId, progress);
         }
 
         protected override RCommandBase? RegisterProgressCompleteCommand(
-            string chainId)
+            string commandRootId)
         {
-            return new SetProgressCompleteCmd(chainId);
+            return new SetProgressCompleteCmd(commandRootId);
         }
     }
 }

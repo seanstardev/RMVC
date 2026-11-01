@@ -1,4 +1,4 @@
-#nullable enable
+﻿#nullable enable
 
 using RMVC;
 using RMVCApp.Sample.Core;
@@ -51,7 +51,7 @@ public class ProgressPanelScript : MonoBehaviour, IProgressView
                 progressScript.UpdateProgress(p.Heading, p.Percent);
 
                 // Cache the newly created item
-                progressItems[p.Id] = progressScript;
+                progressItems[p.CommandId] = progressScript;
             }
         });
     }

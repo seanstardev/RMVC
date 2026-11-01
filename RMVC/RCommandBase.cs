@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,17 +13,17 @@ namespace RMVC
         protected internal virtual bool AllowConcurrentRoots => true;
 
         internal RTracker? Tracker { get; private set; }
-        private bool completeHandled;
-        private int dispatched;
+        private int executionReserved;
 
-        // Each instance may be dispatched once, whether as a root, child or progress callback.
-        internal void ClaimExecution()
+        // Permanently reserve this instance before queueing or running it.
+        // Reservation prevents reuse; it does not mean Run() has started.
+        internal void ReserveForExecution()
         {
-            if (Interlocked.CompareExchange(ref dispatched, 1, 0) == 0)
+            if (Interlocked.CompareExchange(ref executionReserved, 1, 0) == 0)
                 return;
 
             string message =
-                "Command instance has already been dispatched. " +
+                "Command instance has already been reserved for execution. " +
                 $"Create a new {GetType().Name} instance for each execution.";
 
             RFacade.Log($"COMMAND REJECTED: command={GetType().FullName}; reason={message}");
@@ -44,11 +44,25 @@ namespace RMVC
 
         internal RFacade? Facade { get; private set; }
 
+        protected void AbortCommands<TFacade>() where TFacade : RFacade
+            => RFacade.AbortCommands<TFacade>();
+
         protected void AbortAllCommands()
             => Facade?.AbortAllCommands();
 
+        protected Task<bool> AbortAllOtherCommands(
+            uint? timeoutMilliseconds = null)
+        {
+            if (Tracker == null)
+                throw new InvalidOperationException("The command is not running.");
+
+            return RFacade.AbortAllOtherCommands(
+                Tracker,
+                timeoutMilliseconds);
+        }
+
         // The application shell is shared across Facades.
-        protected IRAppShell? AppShell => RFacade.AppShell;
+        protected IRShell? Shell => RFacade.AppShell;
 
         internal abstract Task ExecuteUntypedInternal(RTracker tracker);
 
@@ -58,11 +72,35 @@ namespace RMVC
         protected static Task<TResult> Complete<TResult>(TResult result)
             => Task.FromResult(result);
 
-        protected TModel? Model<TModel>() where TModel : class, IRModel
+        protected TContract? GetFacadeParentByContract<TContract>()
+            where TContract : class, IRFacade
+            => Facade?.ResolveFacadeParentByContract<TContract>();
+
+        protected TFacade? GetFacadeChild<TFacade>()
+            where TFacade : RFacade
+            => Facade?.ResolveFacadeChild<TFacade>();
+
+        protected TBridge? ChildBridge<TBridge>()
+            where TBridge : RBridge
+        {
+            return Facade?.ResolveChildBridge<TBridge>();
+        }
+
+        protected TModel? Model<TModel>()
+            where TModel : class, IRModel
             => Facade?.ResolveModel<TModel>();
-        
-        protected TMediator? Mediator<TMediator>() where TMediator : RMediator
+
+        protected TMediator? Mediator<TMediator>()
+            where TMediator : RMediator
             => Facade?.ResolveMediator<TMediator>();
+
+        protected TContract? ModelByContract<TContract>()
+            where TContract : class
+            => Facade?.ResolveModelByContract<TContract>();
+
+        protected TContract? MediatorByContract<TContract>()
+            where TContract : class
+            => Facade?.ResolveMediatorByContract<TContract>();
 
         internal async Task RunInternalCore(
             RTracker tracker,
@@ -82,7 +120,7 @@ namespace RMVC
                     return;
 
                 if (RFacade.EnableDebugMode && HasParent && !IsProgressCallback)
-                    RFacade.Log($"CHILD START: command={GetType().FullName}; tracker={tracker.Id}; chain={tracker.ChainId}; parent={tracker.Parent?.Id}; thread={Environment.CurrentManagedThreadId}.");
+                    RFacade.Log($"CHILD START: command={GetType().FullName}; commandId={tracker.CommandId}; commandRootId={tracker.CommandRootId}; commandParentId={tracker.Parent?.CommandId}; thread={Environment.CurrentManagedThreadId}.");
 
                 await run().ConfigureAwait(false);
             }
@@ -90,12 +128,12 @@ namespace RMVC
                 when (tracker.Token.IsCancellationRequested)
             {
                 if (RFacade.EnableDebugMode)
-                    RFacade.Log($"COMMAND ABORTED: command={GetType().FullName}; tracker={tracker.Id}; chain={tracker.ChainId}.");
+                    RFacade.Log($"COMMAND ABORTED: command={GetType().FullName}; commandId={tracker.CommandId}; commandRootId={tracker.CommandRootId}.");
             }
             catch (Exception ex)
             {
                 if (RFacade.EnableDebugMode)
-                    RFacade.Log($"COMMAND EXCEPTION: command={GetType().FullName}; tracker={tracker.Id}; chain={tracker.ChainId}; thread={Environment.CurrentManagedThreadId}; {ex}");
+                    RFacade.Log($"COMMAND EXCEPTION: command={GetType().FullName}; commandId={tracker.CommandId}; commandRootId={tracker.CommandRootId}; thread={Environment.CurrentManagedThreadId}; {ex}");
                 
                 tracker.SetError(ex.Message, ex.ToString());
             }
@@ -103,7 +141,7 @@ namespace RMVC
             {
                 await HandleCommandComplete().ConfigureAwait(false);
                 if (RFacade.EnableDebugMode && HasParent && !IsProgressCallback)
-                    RFacade.Log($"CHILD END: command={GetType().FullName}; tracker={tracker.Id}; chain={tracker.ChainId}; errorOrAbort={tracker.ErrorOrAbort}; error={tracker.GetLatestError()?.Message ?? string.Empty}; thread={Environment.CurrentManagedThreadId}.");
+                    RFacade.Log($"CHILD END: command={GetType().FullName}; commandId={tracker.CommandId}; commandRootId={tracker.CommandRootId}; errorOrAbort={tracker.ErrorOrAbort}; error={tracker.GetLatestError()?.Message ?? string.Empty}; thread={Environment.CurrentManagedThreadId}.");
             }
         }
 
@@ -114,7 +152,7 @@ namespace RMVC
         {
             if (Tracker != null)
             {
-                command.ClaimExecution();
+                command.ReserveForExecution();
                 command.HasParent = true;
                 command.IsProgressCallback = IsProgressCallback;
 
@@ -131,7 +169,7 @@ namespace RMVC
         {
             if (Tracker != null)
             {
-                command.ClaimExecution();
+                command.ReserveForExecution();
                 command.HasParent = true;
                 command.IsProgressCallback = IsProgressCallback;
 
@@ -147,13 +185,8 @@ namespace RMVC
         // True when no error has been recorded and no cancellation requested.
         protected virtual void OnCommandExit(bool noErrorOrAbort) { }
 
-        internal async Task HandleCommandComplete()
+        private async Task HandleCommandComplete()
         {
-            if (completeHandled)
-                return;
-
-            completeHandled = true;
-
             if (Tracker != null)
             {
                 OnCommandExit(!Tracker.ErrorOrAbort);
@@ -250,6 +283,15 @@ namespace RMVC
         protected IReadOnlyList<RErrorItem> Errors 
             => Tracker?.GetErrors() ?? Array.Empty<RErrorItem>();
         
+        protected bool AbortRequested
+            => Tracker?.Token.IsCancellationRequested ?? false;
+
+        protected void ThrowIfAbortRequested()
+        {
+            if (AbortRequested)
+                throw new OperationCanceledException();
+        }
+
         protected bool ErrorOrAbort 
             => Tracker?.ErrorOrAbort ?? false;
 
@@ -272,7 +314,7 @@ namespace RMVC
             if (!IsProgressCallback)
                 return false;
         
-            RFacade.Log($"PROGRESS IGNORED: command={GetType().FullName}; tracker={Tracker?.Id}; chain={Tracker?.ChainId}; reason=framework progress callbacks cannot report their own progress.");
+            RFacade.Log($"PROGRESS IGNORED: command={GetType().FullName}; commandId={Tracker?.CommandId}; commandRootId={Tracker?.CommandRootId}; reason=framework progress callbacks cannot report their own progress.");
             
             return true;
         }

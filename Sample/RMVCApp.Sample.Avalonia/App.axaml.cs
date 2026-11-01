@@ -1,4 +1,4 @@
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Data.Core.Plugins;
@@ -43,6 +43,16 @@ namespace RMVCApp.Avalonia
             }
 
             base.OnFrameworkInitializationCompleted();
+        }
+
+        public void HandleInitialisationFailed(
+            string facadeName,
+            string message)
+        {
+            _ = ShowMessageBox(
+                "Initialisation failed",
+                facadeName + "\n\n" + message,
+                false);
         }
 
         public async Task<bool> ShowMessageBox(string? title, string message, bool isYesNo) 

@@ -1,4 +1,4 @@
-using System.Threading.Tasks;
+﻿using System.Threading.Tasks;
 using RMVC;
 using RMVCApp.Sample.Core.Command;
 
@@ -6,11 +6,11 @@ namespace RMVCApp.Sample.Core
 {
     internal class SetProgressCompleteCmd : RMVCAppCommandBase<RVoid>
     {
-        private string chainId;
+        private string commandRootId;
 
-        public SetProgressCompleteCmd(string chainId)
+        public SetProgressCompleteCmd(string commandRootId)
         {
-            this.chainId = chainId;
+            this.commandRootId = commandRootId;
         }
 
         protected override async Task<RVoid> Run() 

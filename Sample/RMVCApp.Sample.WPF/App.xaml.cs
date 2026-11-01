@@ -14,6 +14,16 @@ namespace RMVCApp.WPF
             base.OnStartup(e);
         }
 
+        public void HandleInitialisationFailed(
+            string facadeName,
+            string message)
+        {
+            _ = ShowMessageBox(
+                "Initialisation failed",
+                facadeName + "\n\n" + message,
+                false);
+        }
+
         public Task<bool> ShowMessageBox(
             string title,
             string message,

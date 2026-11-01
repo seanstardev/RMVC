@@ -1,4 +1,4 @@
-using RMVC;
+﻿using RMVC;
 using RMVCApp.Sample.Core;
 
 namespace RMVCApp.Forms 
@@ -12,6 +12,16 @@ namespace RMVCApp.Forms
 
             InitializeComponent();
             mainView1.mainFormParent = this;
+        }
+
+        public void HandleInitialisationFailed(
+            string facadeName,
+            string message)
+        {
+            _ = ShowMessageBox(
+                "Initialisation failed",
+                facadeName + "\n\n" + message,
+                false);
         }
 
         public Task<bool> ShowMessageBox(

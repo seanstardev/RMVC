@@ -1,4 +1,4 @@
-using System.Threading.Tasks;
+﻿using System.Threading.Tasks;
 using RMVC;
 using RMVCApp.Sample.Core.Command;
 using System;
@@ -9,11 +9,11 @@ namespace RMVCApp.Sample.Core
     internal class SetProgressUpdateCmd : RMVCAppCommandBase<RVoid>
     {
         private readonly RProgress[] progress;
-        private string chainId;
+        private string commandRootId;
 
-        public SetProgressUpdateCmd(string chainId, RProgress[] progress)
+        public SetProgressUpdateCmd(string commandRootId, RProgress[] progress)
         {
-            this.chainId = chainId;
+            this.commandRootId = commandRootId;
             this.progress = progress;
         }
 

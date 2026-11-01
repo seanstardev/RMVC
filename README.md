@@ -144,12 +144,58 @@ public class AppFacade : RFacade
         };
     }
 
-    protected override RCommandBase RegisterStartupCommand()
+    protected override RCommandBase RegisterInitialiseCommand(object? initialisation)
     {
         return new StartupCmd();
     }
 }
 ```
+
+
+## Composed facade initialisation
+
+Standalone applications keep automatic initialisation:
+
+```csharp
+RFacade.Create<WorkbenchFacade>(shell);
+```
+
+A host can create children which wait for an explicit initialisation payload:
+
+```csharp
+RFacade.Create<AtlasFacade>(
+    shell,
+    RFacade.Child<WorkbenchFacade>(),
+    RFacade.Child<ProviderFacade>());
+```
+
+The entire composition is registered before the host's initialise command runs.
+Children use the shared application shell. Their actors may register immediately;
+root commands submitted while awaiting initialisation are retained by the startup
+queue. A registration failure publishes none of the new facades.
+
+Commands, models, mediators and facades can resolve an exact facade type through
+`GetFacade<TFacade>()`. The result is nullable. The host's initialise command can
+then supply a module-defined payload:
+
+```csharp
+await base.GetFacade<WorkbenchFacade>()!
+    .Initialise(new WorkbenchInitialisationDto(workingFolder));
+```
+
+Each facade implements `RegisterInitialiseCommand(object? initialisation)`. Automatic
+initialisation supplies null; explicit initialisation forwards its argument without
+conversion. The module validates its supported payloads. Changing from the old
+parameterless hook requires updating existing facade overrides.
+
+`Initialise` can be called once. A repeat request throws synchronously at the call
+site. Hook exceptions, command errors and aborts fault the returned task, notify the
+shell and prevent queued commands from running. A successful task represents the
+end of initialisation; it does not await the startup queue drain. Retained root
+commands then run fully in order, each with fresh error and cancellation state.
+New arrivals join that queue until it empties, after which normal root concurrency
+resumes. Commands executed as children of initialisation bypass this root queue.
+
 
 ---
 
@@ -598,3 +644,74 @@ Feedback, experimentation and contributions are welcome.
 # License
 
 RMVC is released under the MIT License.
+
+
+## Actor lookup by contract
+
+Commands and facades can resolve a registered framework actor through an interface
+or base class without changing existing concrete actor registration:
+
+```csharp
+protected ISettingsProxy? SettingsProxy
+    => base.ModelByContract<ISettingsProxy>();
+
+protected Shared.SettingsMediator? SettingsMediator
+    => base.MediatorByContract<Shared.SettingsMediator>();
+```
+
+Each call searches the current facade only. ModelByContract searches registered
+models/proxies; MediatorByContract searches registered mediators, not their attached
+views. The categories are independent. Exactly one assignable instance returns that
+original instance as the requested type; no matches or multiple matches return null.
+An exact concrete match receives no preference if another derived match exists.
+Matching uses the C# type system (`is TContract`), so both interfaces and base classes
+work. There is no cache or cross-facade fallback. Debug mode logs the first two
+matching actor types when a lookup is ambiguous.
+
+Existing Model<T>() and Mediator<T>() remain exact-type lookups. Registration,
+view-contract attachment and command execution behavior are unchanged. The new
+methods are on RCommandBase and RFacade; this change does not add actor lookup to
+models or mediators themselves.
+
+Run the isolated checks with:
+
+```text
+dotnet run --project Tests/RMVC.ContractLookupChecks/RMVC.ContractLookupChecks.csproj
+```
+
+The harness also performs test-only registry mutations to verify fresh searches;
+it does not introduce a production registration/unregistration API.
+
+## Awaiting cancellation of other commands
+
+Within a running command:
+
+```csharp
+bool completed = await base.AbortAllOtherCommands(1500);
+```
+
+The timeout is nullable unsigned milliseconds. Omit it or pass null to wait
+indefinitely. uint.MaxValue is reserved by the underlying timer and is rejected.
+The caller must await the returned task: its root chain remains registered and
+is excluded from cancellation, including when this is called from a child.
+
+Only one application-wide wait can be active. Another request logs an overlap
+in debug mode and returns false without replacing the original request. True
+means all outstanding cancellation passes returned and only the caller's root remained. False
+means timeout or an ignored overlap; unfinished work is not forcibly terminated.
+Cancellation callbacks run on a worker so a blocked callback does not prevent
+the timeout from being observed by the caller.
+
+This does not block new root submissions or clear startup queues. Applications
+remain responsible for preventing new work during shutdown. Existing
+AbortAllCommands and AbortCommands<TFacade> behaviour is unchanged.
+
+Run the cancellation checks with:
+
+```text
+dotnet run --project Tests/RMVC.ContractLookupChecks/RMVC.ContractLookupChecks.csproj -- abort-wait
+```
+
+A timed-out wait does not clear the count of cancellation passes still running.
+A subsequent wait also waits for those earlier passes, including their callbacks.
+Run `abort-wait-retry` in the same harness to exercise this timeout/retry case.
