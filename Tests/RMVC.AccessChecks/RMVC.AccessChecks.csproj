@@ -1,0 +1,13 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <Probe Condition="'$(Probe)' == ''">EssentialUsage</Probe>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../RMVC/RMVC.csproj" />
+    <Compile Include="Common.cs" />
+    <Compile Include="$(Probe).cs" />
+  </ItemGroup>
+</Project>

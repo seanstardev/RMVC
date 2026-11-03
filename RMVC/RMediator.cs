@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 namespace RMVC
 {
@@ -47,7 +47,7 @@ namespace RMVC
 
             try
             {
-                Initialised();
+                NotifyActorAttached(actor);
             }
             catch
             {
@@ -79,9 +79,12 @@ namespace RMVC
 
         internal void RemoveActorBase()
         {
+            IRContract actor;
+
             lock (actorGate)
             {
                 if (ActorBase == null) return;
+                actor = ActorBase;
 
                 actorAttached = false;
 
@@ -89,7 +92,7 @@ namespace RMVC
             }
             try
             {
-                Disposing();
+                NotifyActorDetached(actor);
             }
             finally
             {
@@ -138,8 +141,8 @@ namespace RMVC
                 throw;
             }
         }
-        protected abstract void Initialised();
-        protected abstract void Disposing();
+        internal abstract void NotifyActorAttached(IRContract actor);
+        internal abstract void NotifyActorDetached(IRContract actor);
     }
 
     public abstract class RMediator<TActor> : RMediator
@@ -150,7 +153,20 @@ namespace RMVC
 
         }
 
-        protected TActor? actor => (TActor?)ActorBase;
+        /// <summary>The framework-owned current attachment; application mediators must not retain another copy.</summary>
+        protected TActor? Actor => (TActor?)ActorBase;
+
+        internal sealed override void NotifyActorAttached(IRContract actor)
+            => ActorAttached((TActor)actor);
+
+        internal sealed override void NotifyActorDetached(IRContract actor)
+            => ActorDetached((TActor)actor);
+
+        /// <summary>Receives the non-null attachment for subscription; do not store it.</summary>
+        protected abstract void ActorAttached(TActor actor);
+
+        /// <summary>Receives the departing attachment for unsubscription; do not store it.</summary>
+        protected abstract void ActorDetached(TActor actor);
 
         protected void WithActor(Action<TActor> action)
             => EnqueueActorAction(actor => action((TActor)actor));

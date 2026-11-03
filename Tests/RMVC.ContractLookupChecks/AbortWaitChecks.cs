@@ -196,7 +196,7 @@ namespace RMVC.ContractLookupChecks
 
             protected override IRModel[] RegisterModels() => new IRModel[] { Dispatcher };
             protected override RMediator[] RegisterMediators() => Array.Empty<RMediator>();
-            protected override RCommandBase CreateInitialiseCommand(object? initialisation)
+            protected override RCommandBase CreateInitialiseCommand(IRInitialisation? initialisation)
                 => new HostInitialiseCommand();
         }
 
@@ -206,7 +206,7 @@ namespace RMVC.ContractLookupChecks
 
             protected override IRModel[] RegisterModels() => new IRModel[] { Dispatcher };
             protected override RMediator[] RegisterMediators() => Array.Empty<RMediator>();
-            protected override RCommandBase CreateInitialiseCommand(object? initialisation)
+            protected override RCommandBase CreateInitialiseCommand(IRInitialisation? initialisation)
                 => new EmptyCommand();
         }
 
@@ -214,7 +214,7 @@ namespace RMVC.ContractLookupChecks
         {
             protected override async Task<RVoid> Run()
             {
-                await base.GetFacadeChild<OtherFacade>()!.Initialise(null);
+                base.InitialiseFacadeChild<OtherFacade>();
                 HostFacade.Ready.TrySetResult(true);
 
                 return await Complete();
@@ -342,14 +342,18 @@ namespace RMVC.ContractLookupChecks
 
         private sealed class CheckShell : IRShell
         {
-            public void HandleOperationsStarted() { }
-            public void HandleOperationsCompleted() { }
 
-            public void HandleInitialisationFailed(string facadeName, string message)
-                => HostFacade.Ready.TrySetException(new Exception(message));
+            public void HandleStateChanged(RMVC.RApplicationState state, string? detail = null)
+        {
+            if (state != RMVC.RApplicationState.Failed) return;
+            string message = detail ?? "";
+            string facadeName = message.StartsWith("Facade: ") ? message.Split('\n')[0][8..].Trim() : "";
+            if (message.StartsWith("Facade: ")) message = message[(message.IndexOf('\n') + 1)..];
+            HostFacade.Ready.TrySetException(new Exception(message));
+        }
 
-            public Task<bool> ShowMessageBox(string title, string message, bool isYesNo = false)
-                => Task.FromResult(false);
+            public bool ShowMessageBox(string title, string message, bool isYesNo = false)
+                => false;
         }
     }
 }

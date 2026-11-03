@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -31,7 +31,7 @@ namespace RMVC
             throw new InvalidOperationException(message);
         }
 
-        internal bool HasParent { get; set; }
+        internal bool HasCommandParent { get; set; }
 
         // Progress callbacks run within the reporting chain and must not report progress recursively.
         internal bool IsProgressCallback { get; set; }
@@ -45,14 +45,22 @@ namespace RMVC
         internal RFacade? Facade { get; private set; }
 
         protected void AbortCommands<TFacade>() where TFacade : RFacade
-            => RFacade.AbortCommands<TFacade>();
+        {
+            RequireActorAccess();
+            RFacade.AbortCommands<TFacade>();
+        }
 
         protected void AbortAllCommands()
-            => Facade?.AbortAllCommands();
+        {
+            RequireActorAccess();
+            if (Facade != null)
+                RFacade.AbortAllCommands();
+        }
 
         protected Task<bool> AbortAllOtherCommands(
             uint? timeoutMilliseconds = null)
         {
+            RequireActorAccess();
             if (Tracker == null)
                 throw new InvalidOperationException("The command is not running.");
 
@@ -61,8 +69,25 @@ namespace RMVC
                 timeoutMilliseconds);
         }
 
+        /// <summary>Terminal shutdown: preserves this root for Shell-only completion. Faults on timeout or cleanup failure.</summary>
+        /// <remarks>Only after full initialisation. After calling, do not use actors, cached actor references, delegates or actor-backed logging; only Shell interaction and local control flow remain valid.</remarks>
+        protected Task Shutdown(uint milliseconds)
+        {
+            var tracker = Tracker ?? throw new InvalidOperationException("Shutdown requires a running command.");
+            return RFacade.ShutdownInternal(milliseconds, tracker);
+        }
+
+        private void RequireActorAccess()
+        {
+            if (Tracker?.IsShutdownCoordinator == true)
+                throw new InvalidOperationException(
+                    $"Command '{GetType().FullName}' belongs to the shutdown-coordinating root. " +
+                    "Actor lookup and child execution are forbidden after Shutdown starts; only Shell interaction and local control flow are permitted.");
+        }
+
         // The application shell is shared across Facades.
-        protected IRShell? Shell => RFacade.AppShell;
+        protected IRShell Shell => Facade != null ? RFacade.AppShell
+            : throw new InvalidOperationException("Shell requires a command bound to a facade.");
 
         internal abstract Task ExecuteUntypedInternal(RTracker tracker);
 
@@ -72,35 +97,114 @@ namespace RMVC
         protected static Task<TResult> Complete<TResult>(TResult result)
             => Task.FromResult(result);
 
-        protected TContract? GetFacadeParentByContract<TContract>()
-            where TContract : class, IRFacade
-            => Facade?.ResolveFacadeParentByContract<TContract>();
+        /// <summary>True when composition assigned this facade a direct parent.</summary>
+        protected bool HasFacadeParent => Facade?.HasFacadeParent
+            ?? throw new InvalidOperationException("HasFacadeParent requires a command bound to a facade.");
 
-        protected TFacade? GetFacadeChild<TFacade>()
-            where TFacade : RFacade
-            => Facade?.ResolveFacadeChild<TFacade>();
-
-        protected TBridge? ChildBridge<TBridge>()
-            where TBridge : RBridge
+        /// <summary>Stages one direct child's initialisation from the selected initialiser's Run body.</summary>
+        protected void InitialiseFacadeChild<TChild>(IRInitialisation? initialisation = null)
+            where TChild : RFacade
         {
-            return Facade?.ResolveChildBridge<TBridge>();
+            RequireActorAccess();
+            if (Facade == null)
+                throw new InvalidOperationException("Child initialisation requires a command bound to a facade.");
+            Facade.StageChildInitialisation(this, typeof(TChild), initialisation);
         }
 
-        protected TModel? Model<TModel>()
+        /// <summary>Returns the immediate parent's interface capability, or null when unbound, absent or incompatible; rejects class arguments.</summary>
+        protected TContract? FacadeParentByContract<TContract>()
+            where TContract : class, IRFacade
+        {
+            RequireActorAccess();
+            RFacade.ValidateFacadeParentContract<TContract>();
+            return Facade?.ResolveFacadeParentByContract<TContract>();
+        }
+
+        /// <summary>Returns the registered direct child of exactly this facade type; throws when unbound or absent.</summary>
+        protected TFacade FacadeChild<TFacade>()
+            where TFacade : RFacade
+        {
+            RequireActorAccess();
+            if (Facade == null)
+                throw new InvalidOperationException(
+                    $"Command '{GetType().FullName}' is not bound to a facade; " +
+                    $"cannot resolve direct child facade '{typeof(TFacade).FullName}'.");
+
+            return Facade.ResolveFacadeChild<TFacade>();
+        }
+
+        /// <summary>Returns the bridge of exactly this registered type; throws when unbound or absent.</summary>
+        protected TBridge BridgeChild<TBridge>()
+            where TBridge : RBridge
+        {
+            RequireActorAccess();
+            if (Facade == null)
+                throw new InvalidOperationException(
+                    $"Command '{GetType().FullName}' is not bound to a facade; " +
+                    $"cannot resolve child bridge '{typeof(TBridge).FullName}'.");
+
+            return Facade.ResolveBridgeChild<TBridge>();
+        }
+
+        /// <summary>Returns the unique matching model, including subclasses; throws when unbound, absent or ambiguous.</summary>
+        protected TModel Model<TModel>()
             where TModel : class, IRModel
-            => Facade?.ResolveModel<TModel>();
+        {
+            RequireActorAccess();
+            if (Facade == null)
+                throw new InvalidOperationException(
+                    $"Command '{GetType().FullName}' is not bound to a facade; " +
+                    $"cannot resolve model '{typeof(TModel).FullName}'.");
 
-        protected TMediator? Mediator<TMediator>()
+            return Facade.ResolveModel<TModel>();
+        }
+
+        /// <summary>Returns the unique matching mediator, including subclasses; throws when unbound, absent or ambiguous.</summary>
+        protected TMediator Mediator<TMediator>()
             where TMediator : RMediator
-            => Facade?.ResolveMediator<TMediator>();
+        {
+            RequireActorAccess();
+            if (Facade == null)
+                throw new InvalidOperationException(
+                    $"Command '{GetType().FullName}' is not bound to a facade; " +
+                    $"cannot resolve mediator '{typeof(TMediator).FullName}'.");
 
+            return Facade.ResolveMediator<TMediator>();
+        }
+
+        /// <summary>Returns the unique matching model, including subclasses, or null when unbound, absent or ambiguous.</summary>
+        protected TModel? ModelOrNull<TModel>()
+            where TModel : class, IRModel
+        {
+            RequireActorAccess();
+            return Facade?.ResolveModelOrNull<TModel>();
+        }
+
+        /// <summary>Returns the unique matching mediator, including subclasses, or null when unbound, absent or ambiguous.</summary>
+        protected TMediator? MediatorOrNull<TMediator>()
+            where TMediator : RMediator
+        {
+            RequireActorAccess();
+            return Facade?.ResolveMediatorOrNull<TMediator>();
+        }
+
+        /// <summary>Returns the unique interface match, or null; rejects class arguments.</summary>
         protected TContract? ModelByContract<TContract>()
             where TContract : class
-            => Facade?.ResolveModelByContract<TContract>();
+        {
+            RequireActorAccess();
+            RActorRegistry.ValidateLookupContract<TContract>();
+            return Facade?.ResolveModelByContract<TContract>();
+        }
 
+        /// <summary>Returns the unique interface match, or null; rejects class arguments.</summary>
         protected TContract? MediatorByContract<TContract>()
             where TContract : class
-            => Facade?.ResolveMediatorByContract<TContract>();
+        {
+            RequireActorAccess();
+            RActorRegistry.ValidateLookupContract<TContract>();
+            return Facade?.ResolveMediatorByContract<TContract>();
+        }
 
         internal async Task RunInternalCore(
             RTracker tracker,
@@ -111,6 +215,7 @@ namespace RMVC
 
             try
             {
+                tracker.Facade.ValidateInitialisationExecution(this);
                 if (!IsProgressCallback)
                     await tracker.SetProgressTitle(pendingTitle ?? GetProgressTitle()).ConfigureAwait(false);
 
@@ -119,10 +224,18 @@ namespace RMVC
                 if (tracker.Token.IsCancellationRequested)
                     return;
 
-                if (RFacade.EnableDebugMode && HasParent && !IsProgressCallback)
-                    RFacade.Log($"CHILD START: command={GetType().FullName}; commandId={tracker.CommandId}; commandRootId={tracker.CommandRootId}; commandParentId={tracker.Parent?.CommandId}; thread={Environment.CurrentManagedThreadId}.");
+                if (RFacade.EnableDebugMode && HasCommandParent && !IsProgressCallback)
+                    RFacade.Log($"CHILD START: command={GetType().FullName}; commandId={tracker.CommandId}; commandRootId={tracker.CommandRootId}; commandParentId={tracker.TrackerParent?.CommandId}; thread={Environment.CurrentManagedThreadId}.");
 
-                await run().ConfigureAwait(false);
+                tracker.Facade.BeginInitialisationBody(this);
+                try
+                {
+                    await run().ConfigureAwait(false);
+                }
+                finally
+                {
+                    tracker.Facade.EndInitialisationBody(this);
+                }
             }
             catch (OperationCanceledException)
                 when (tracker.Token.IsCancellationRequested)
@@ -140,46 +253,51 @@ namespace RMVC
             finally
             {
                 await HandleCommandComplete().ConfigureAwait(false);
-                if (RFacade.EnableDebugMode && HasParent && !IsProgressCallback)
+                if (RFacade.EnableDebugMode && HasCommandParent && !IsProgressCallback)
                     RFacade.Log($"CHILD END: command={GetType().FullName}; commandId={tracker.CommandId}; commandRootId={tracker.CommandRootId}; errorOrAbort={tracker.ErrorOrAbort}; error={tracker.GetLatestError()?.Message ?? string.Empty}; thread={Environment.CurrentManagedThreadId}.");
             }
         }
 
         // Await children sequentially; they share this chain's errors and cancellation.
-        protected async Task Execute(
+        // Keep these entry points synchronous so misuse also throws before a Task is returned.
+        protected Task Execute(
             RCommandBase command,
             double percentCap = 100)
         {
-            if (Tracker != null)
-            {
-                command.ReserveForExecution();
-                command.HasParent = true;
-                command.IsProgressCallback = IsProgressCallback;
+            var tracker = RequireChildExecutionTracker();
+            if (command == null) throw new ArgumentNullException(nameof(command));
+            tracker.Facade.ValidateOrdinaryCommand(command);
+            command.ReserveForExecution();
+            command.HasCommandParent = true;
+            command.IsProgressCallback = IsProgressCallback;
 
-                // Execute command with a scaled RTracker child using the provided percentCap
-                await Tracker.Facade.Execute(
-                    command,
-                    Tracker.CreateChild(command, percentCap));
-            }
+            return tracker.Facade.Execute(
+                command,
+                tracker.CreateTrackerChild(command, percentCap));
         }
 
-        protected async Task<TResult> Execute<TResult>(
+        protected Task<TResult> Execute<TResult>(
             RCommand<TResult> command,
             double percentCap = 100)
         {
-            if (Tracker != null)
-            {
-                command.ReserveForExecution();
-                command.HasParent = true;
-                command.IsProgressCallback = IsProgressCallback;
+            var tracker = RequireChildExecutionTracker();
+            if (command == null) throw new ArgumentNullException(nameof(command));
+            tracker.Facade.ValidateOrdinaryCommand(command);
+            command.ReserveForExecution();
+            command.HasCommandParent = true;
+            command.IsProgressCallback = IsProgressCallback;
 
-                // Execute command with a scaled RTracker child using the provided percentCap
-                return await Tracker.Facade.Execute(
-                    command,
-                    Tracker.CreateChild(command, percentCap));
-            }
+            return tracker.Facade.Execute(
+                command,
+                tracker.CreateTrackerChild(command, percentCap));
+        }
 
-            return default!;
+        private RTracker RequireChildExecutionTracker()
+        {
+            RequireActorAccess();
+            return Tracker ?? throw new InvalidOperationException(
+                $"Command '{GetType().FullName}' cannot execute a child command before " +
+                "it is bound for execution. Do not call Execute() from a command constructor.");
         }
 
         // True when no error has been recorded and no cancellation requested.
@@ -192,7 +310,7 @@ namespace RMVC
                 OnCommandExit(!Tracker.ErrorOrAbort);
 
                 // Finalise activated reporting. "Complete" means the chain ended, not that it succeeded.
-                if (Tracker.Parent == null && !IsProgressCallback)
+                if (Tracker.TrackerParent == null && !IsProgressCallback)
                     await Tracker.SetProgress(100, "Complete", forceReport: true).ConfigureAwait(false);
             }
         }

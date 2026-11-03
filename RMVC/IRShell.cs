@@ -1,22 +1,17 @@
-﻿using System.Threading.Tasks;
-
-namespace RMVC
+﻿namespace RMVC
 {
+    /// <summary>The required host boundary for interaction and lifecycle observation, including non-interactive hosts.</summary>
     public interface IRShell
     {
-        // RFacade calls these when active operations transition between zero and nonzero.
-        // Implementations marshal UI access as needed.
-        void HandleOperationsStarted();
-        void HandleOperationsCompleted();
+        /// <summary>Reports ordered lifecycle transitions. Failed does not certify resource release.</summary>
+        void HandleStateChanged(RApplicationState state, string? message = null);
 
-        // The shell owns UI dispatch and its response to initialisation failure.
-        void HandleInitialisationFailed(
-            string facadeName,
-            string message);
-
-        Task<bool> ShowMessageBox(
-            string title,
-            string message,
-            bool isYesNo = false);
+        /// <summary>
+        /// Returns the host decision synchronously; this narrow interaction may keep a
+        /// command alive while a user responds. Async-only hosts should throw clearly
+        /// here and supply an application-owned async contract selected by application
+        /// policy. Do not block an async-only event loop to imitate this default.
+        /// </summary>
+        bool ShowMessageBox(string title, string message, bool isYesNo = false);
     }
 }

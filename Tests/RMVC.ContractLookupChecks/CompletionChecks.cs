@@ -254,7 +254,7 @@ namespace RMVC.ContractLookupChecks
             internal void Submit(RCommandBase command) => Execute(command);
             protected override IRModel[] RegisterModels() => [];
             protected override RMediator[] RegisterMediators() => [];
-            protected override RCommandBase CreateInitialiseCommand(object? initialisation) => new Initialise();
+            protected override RCommandBase CreateInitialiseCommand(IRInitialisation? initialisation) => new Initialise();
             protected override RCommandBase? CreateProgressUpdateCommand(string commandRootId, RProgress[] progress)
                 => current!.Callback(Role.Update);
             protected override RCommandBase? CreateProgressCompleteCommand(string commandRootId)
@@ -266,24 +266,16 @@ namespace RMVC.ContractLookupChecks
         }
         private sealed class TestShell : IRShell
         {
-            private readonly object gate = new();
-            private TaskCompletionSource idle = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            private bool active;
-            internal Task WaitForIdle()
-            {
-                lock (gate) return active ? idle.Task.WaitAsync(TimeSpan.FromSeconds(10)) : Task.CompletedTask;
-            }
-            public void HandleOperationsStarted()
-            {
-                lock (gate) { active = true; idle = new(TaskCreationOptions.RunContinuationsAsynchronously); }
-            }
-            public void HandleOperationsCompleted()
-            {
-                lock (gate) { active = false; idle.TrySetResult(); }
-            }
-            public void HandleInitialisationFailed(string facadeName, string message)
-                => throw new Exception("Unexpected initialisation failure: " + message);
-            public Task<bool> ShowMessageBox(string title, string message, bool isYesNo = false) => Task.FromResult(false);
+            internal Task WaitForIdle() => TestRuntime.WaitIdle();
+            public void HandleStateChanged(RMVC.RApplicationState state, string? detail = null)
+        {
+            if (state != RMVC.RApplicationState.Failed) return;
+            string message = detail ?? "";
+            string facadeName = message.StartsWith("Facade: ") ? message.Split('\n')[0][8..].Trim() : "";
+            if (message.StartsWith("Facade: ")) message = message[(message.IndexOf('\n') + 1)..];
+            throw new Exception("Unexpected initialisation failure: " + message);
+        }
+            public bool ShowMessageBox(string title, string message, bool isYesNo = false) => false;
         }
     }
 }

@@ -1,4 +1,6 @@
-﻿namespace RMVC
+﻿using System;
+
+namespace RMVC
 {
     public abstract class RCommandExecutorBase
     {
@@ -8,23 +10,22 @@
 
         internal RFacade? Facade { get; set; }
 
-        protected TContract? GetFacadeParentByContract<TContract>()
-            where TContract : class, IRFacade
-            => Facade?.ResolveFacadeParentByContract<TContract>();
-
-        protected TFacade? GetFacadeChild<TFacade>()
-            where TFacade : RFacade
-            => Facade?.ResolveFacadeChild<TFacade>();
-
-        protected void Execute(RCommandBase command)
-            => Facade?.Execute(command, GetType().FullName);
-
-        protected void ExecuteSequentially(
-            params RCommandBase[] commands)
+        /// <summary>
+        /// Submits one ordered batch of independent roots. Separate calls can overlap.
+        /// Prefer one root per initiating event; compose its work inside that command.
+        /// </summary>
+        protected void Execute(params RCommandBase[] commands)
         {
-            Facade?.ExecuteSequentially(
-                commands,
-                GetType().FullName);
+            if (Facade != null)
+            {
+                Facade.Execute(commands, GetType().FullName);
+                return;
+            }
+
+            throw new InvalidOperationException(
+                $"Actor '{GetType().FullName}' cannot execute commands without a facade binding. " +
+                "Register the actor with RFacade before submitting commands; " +
+                "bridges require a registered destination child. Do not call Execute() from its constructor.");
         }
     }
 }

@@ -9,7 +9,7 @@ namespace RMVC.ContractLookupChecks
 
         internal static async Task Run()
         {
-            RFacade.Create<Host>();
+            RFacade.Create<Host>(new Shell());
             var errors = await finished.Task.WaitAsync(TimeSpan.FromSeconds(10));
             var root = errors.Single(item => item.Message == "root error");
             var child = errors.Single(item => item.Message == "child error");
@@ -33,7 +33,7 @@ namespace RMVC.ContractLookupChecks
         {
             protected override IRModel[] RegisterModels() => [new Launcher()];
             protected override RMediator[] RegisterMediators() => [];
-            protected override RCommandBase CreateInitialiseCommand(object? initialisation)
+            protected override RCommandBase CreateInitialiseCommand(IRInitialisation? initialisation)
                 => new Initialise();
         }
 
@@ -41,7 +41,7 @@ namespace RMVC.ContractLookupChecks
         {
             protected override Task<RVoid> Run()
             {
-                Model<Launcher>()!.Start();
+                Model<Launcher>().Start();
                 return Complete();
             }
         }

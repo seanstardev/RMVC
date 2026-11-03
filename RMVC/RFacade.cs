@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
@@ -14,6 +14,7 @@ namespace RMVC
         {
             Awaiting,
             Running,
+            Initialised,
             Draining,
             Ready,
             Failed
@@ -34,9 +35,27 @@ namespace RMVC
             }
         }
 
-        private RFacade? parentFacade;
+        private sealed class FacadeInitialisationException : Exception
+        {
+            internal string FacadeName { get; }
 
-        private IReadOnlyList<RFacade> childFacades = Array.Empty<RFacade>();
+            internal FacadeInitialisationException(Type facadeType, Exception error)
+                : base(error.Message, error)
+            {
+                FacadeName = facadeType.FullName ?? facadeType.Name;
+            }
+        }
+
+        private RCommandBase? initialiseCommand;
+        private Type? initialiseCommandType;
+        private bool acceptingChildInitialisations;
+        private readonly Dictionary<Type, IRInitialisation?> childInitialisations =
+            new Dictionary<Type, IRInitialisation?>();
+
+        private RFacade? facadeParent;
+        internal bool HasFacadeParent => facadeParent != null;
+
+        private IReadOnlyList<RFacade> facadeChildren = Array.Empty<RFacade>();
 
         private readonly object initialisationGate = new object();
 
@@ -49,23 +68,27 @@ namespace RMVC
 
         private static readonly object registryGate = new object();
 
-        private static readonly ROperationRegistry operations =
-            new ROperationRegistry(NotifyOperationState);
+        private static readonly ROperationRegistry operations = new ROperationRegistry();
+        private static readonly RApplicationLifecycle application = new RApplicationLifecycle(operations);
+        private static readonly TaskCompletionSource<bool> startupFinished =
+            new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        private static IReadOnlyList<RFacade> composition = Array.Empty<RFacade>();
 
-        private static IRShell? appShell;
-
-        internal protected static IRShell? AppShell
-        {
-            get { lock (registryGate) { return appShell; } }
-        }
+        internal static IRShell AppShell => application.Shell;
 
         private readonly RActorRegistry actors;
 
-        private readonly Dictionary<Type, RBridge> childBridgesDictionary =
+        private int bridgesRegistrationStarted;
+
+        private readonly Dictionary<Type, RBridge> bridgesChildDictionary =
             new Dictionary<Type, RBridge>();
 
         private static readonly Dictionary<Type, RFacade> activeFacades = 
             new Dictionary<Type, RFacade>();
+        // The first Create invocation claims this runtime for its entire lifetime.
+        // Cleanup and failed argument validation never release the claim.
+        private static Type? facadeRootType;
+
         private static readonly HashSet<Type> pendingFacades = 
             new HashSet<Type>();
 
@@ -77,11 +100,32 @@ namespace RMVC
                 () => new TFacade());
         }
 
+        /// <summary>
+        /// Constructs a composition synchronously and starts its internal initialisation lifecycle.
+        /// Only the first invocation is permitted, even if validation or startup fails.
+        /// Later calls throw before changing the original runtime. No reset is provided.
+        /// Invalid composition requests throw before construction. Construction or
+        /// initialisation failure triggers model cleanup, then HandleStateChanged(Failed) on
+        /// the required shared Shell. The host must stay alive for this lifecycle.
+        /// </summary>
         public static void Create<TFacade>(
-            IRShell? appShell = null,
+            IRShell appShell,
             params RFacadeChildRegistration[] children)
             where TFacade : RFacade, new()
         {
+            lock (registryGate)
+            {
+                if (facadeRootType != null)
+                    throw new InvalidOperationException(
+                        $"RFacade.Create() may be called only once per application lifetime. " +
+                        $"The first attempt selected '{facadeRootType.FullName}'. " +
+                        "Declare all children in that initial composition. " +
+                        "Failed startup does not permit recreation.");
+
+                facadeRootType = typeof(TFacade);
+            }
+
+            if (appShell == null) throw new ArgumentNullException(nameof(appShell));
             if (children == null)
                 throw new ArgumentNullException(nameof(children));
 
@@ -106,32 +150,41 @@ namespace RMVC
             lock (registryGate)
             {
                 foreach (var type in types)
-                {
-                    if (activeFacades.ContainsKey(type) || pendingFacades.Contains(type))
-                    {
-                        throw new InvalidOperationException(
-                            $"Facade '{type.FullName}' already exists or is currently being created.");
-                    }
-                }
-
-                foreach (var type in types)
                     pendingFacades.Add(type);
             }
 
+            var facades = new List<RFacade>();
+            composition = facades;
+            application.Begin(appShell);
+            bool cleanupPending = false;
+            Type buildingType = typeof(TFacade);
+            string stage = "Facade constructor";
+
             try
             {
-                var facades = new List<RFacade>();
-
                 foreach (var registration in registrations)
-                    facades.Add(BuildFacade(registration));
+                {
+                    buildingType = registration.FacadeType;
+                    stage = "Facade constructor";
+                    var facade = registration.Factory();
+                    facades.Add(facade);
+                    stage = "RegisterModels";
+                    facade.actors.RegisterModels(facade.RegisterModels);
+                    stage = "RegisterMediators";
+                    facade.actors.RegisterMediators(facade.RegisterMediators);
+                }
 
-                facades[0].childFacades = facades.GetRange(1, facades.Count - 1).AsReadOnly();
+                facades[0].facadeChildren = facades.GetRange(1, facades.Count - 1).AsReadOnly();
 
-                foreach (var child in facades[0].childFacades)
-                    child.parentFacade = facades[0];
+                foreach (var child in facades[0].facadeChildren)
+                    child.facadeParent = facades[0];
 
                 foreach (var facade in facades)
-                    facade.InitialiseChildBridges();
+                {
+                    buildingType = facade.GetType();
+                    stage = "RegisterBridges";
+                    facade.InitialiseBridgesChild();
+                }
 
                 // All actors can find their facade before any initialise command runs.
                 lock (registryGate)
@@ -141,118 +194,193 @@ namespace RMVC
                         activeFacades.Add(facade.GetType(), facade);
                     }
 
-                    if (RFacade.appShell == null)
-                        RFacade.appShell = appShell;
+
                 }
 
-                // Children stay Awaiting until explicitly initialised by their host.
-                _ = facades[0].Initialise(null);
+                // The root stages child requests; ordinary queues open only after full success.
+                if (application.ShutdownRequested) startupFinished.TrySetResult(true);
+                else _ = Task.Run(() => facades[0].InitialiseCompositionAsync());
             }
             catch (Exception error)
             {
-                Log($"FACADE CREATION ERROR: {error}");
+                // Generic construction in .NET wraps the constructor's exception.
+                // Preserve the application's actual cause in startup diagnostics.
+                var cause = stage == "Facade constructor"
+                    && error is System.Reflection.TargetInvocationException invocation
+                    && invocation.InnerException != null 
+                        ? invocation.InnerException 
+                        : error;
 
-                throw;
+                cleanupPending = true;
+
+                _ = Task.Run(() => RecoverConstructionAsync(
+                    facades, cause, buildingType.FullName ?? buildingType.Name, stage, types));
             }
             finally
             {
-                lock (registryGate)
-                {
-                    foreach (var type in types)
-                        pendingFacades.Remove(type);
-                }
+                if (!cleanupPending)
+                    ReleaseFacadeReservations(types);
             }
         }
 
-        private static RFacade BuildFacade(RFacadeChildRegistration registration)
+        private static async Task RecoverConstructionAsync(
+            IReadOnlyList<RFacade> facades, Exception error, string name, string stage, IEnumerable<Type> types)
         {
-            RFacade facade = registration.Factory();
-
-            facade.actors.RegisterModels(facade.RegisterModels());
-            facade.actors.RegisterMediators(facade.RegisterMediators());
-
-            return facade;
+            try { await HandleStartupFailureAsync(facades, error, name, stage, types).ConfigureAwait(false); }
+            finally { startupFinished.TrySetResult(true); }
         }
 
-        private void InitialiseChildBridges()
+        /// <summary>
+        /// Starts terminal shutdown within one overall millisecond budget. Returns a Task
+        /// that completes after cleanup or faults on timeout/cleanup failure. Repeated calls
+        /// share the original Task and budget. Shell also receives Stopped/Failed.
+        /// Commands must use their protected Shutdown helper to avoid awaiting their own drain.
+        /// Expiry cannot forcibly stop code. No retry, restart or process-exit policy is supplied.
+        /// </summary>
+        public static Task Shutdown(uint timeoutMilliseconds)
+            => ShutdownInternal(timeoutMilliseconds, null);
+
+        internal static Task ShutdownInternal(uint timeoutMilliseconds, RTracker? coordinator)
         {
-            foreach (var bridge in RegisterBridges())
+            if (timeoutMilliseconds == uint.MaxValue)
+                throw new ArgumentOutOfRangeException(nameof(timeoutMilliseconds), "The maximum timer value is reserved; supply a finite budget below uint.MaxValue.");
+            return application.Shutdown(timeoutMilliseconds, async () =>
             {
+                application.SetShutdownStage("waiting for startup to unwind");
+                operations.AbortAllCommands();
+                await startupFinished.Task.ConfigureAwait(false);
+                application.SetShutdownStage("draining command work");
+                operations.AbortAllCommands();
+                await operations.Drain().ConfigureAwait(false);
+                var failures = new List<Exception>();
+                for (int index = composition.Count - 1; index >= 0; index--)
+                {
+                    var facade = composition[index];
+                    lock (facade.initialisationGate) facade.pendingCommands.Clear();
+                    application.SetShutdownStage("cleaning models in " + facade.GetType().FullName);
+                    failures.AddRange(await facade.actors.CleanupModels().ConfigureAwait(false));
+                }
+                // Construction may have been interrupted before publication. Release only
+                // successfully cleaned unpublished actors; creation itself stays consumed.
+                lock (registryGate)
+                {
+                    if (failures.Count == 0)
+                        foreach (var facade in composition)
+                            if (!activeFacades.ContainsKey(facade.GetType()))
+                                facade.actors.ReleaseOwnership();
+                    pendingFacades.Clear();
+                }
+                return failures;
+            }, coordinator);
+        }
+
+        private static void ReleaseFacadeReservations(IEnumerable<Type> types)
+        {
+            lock (registryGate)
+                foreach (var type in types)
+                    pendingFacades.Remove(type);
+        }
+
+        private void InitialiseBridgesChild()
+        {
+            if (Interlocked.Exchange(ref bridgesRegistrationStarted, 1) != 0)
+                throw new InvalidOperationException(
+                    $"Facade '{GetType().FullName}': RegisterBridges() registration has already been attempted. Registration is permitted once.");
+
+            var bridges = RegisterBridges() ?? throw new InvalidOperationException(
+                $"Facade '{GetType().FullName}': RegisterBridges() returned null. Return an empty array instead.");
+
+            foreach (var bridge in bridges)
+            {
+                if (bridge == null)
+                    throw new InvalidOperationException(
+                        $"Facade '{GetType().FullName}': RegisterBridges() returned a null entry.");
+
                 var bridgeType = bridge.GetType();
 
-                if (childBridgesDictionary.ContainsKey(bridgeType))
+                if (bridgesChildDictionary.ContainsKey(bridgeType))
                 {
                     throw new InvalidOperationException(
                         $"Facade '{GetType().FullName}' registers bridge " +
                         $"'{bridgeType.FullName}' more than once.");
                 }
 
-                childBridgesDictionary.Add(bridgeType, bridge);
+                bridgesChildDictionary.Add(bridgeType, bridge);
 
-                foreach (var child in childFacades)
+                RFacade? destination = null;
+                foreach (var child in facadeChildren)
                 {
                     if (child.GetType() == bridge.DestinationFacadeType)
                     {
-                        bridge.Facade = child;
+                        destination = child;
                         break;
                     }
                 }
 
-                if (bridge.Facade == null)
-                {
-                    Log(
-                        $"BRIDGE UNCONNECTED: bridge={bridgeType.FullName}; " +
-                        $"destination={bridge.DestinationFacadeType.FullName}.");
-                }
+                if (destination == null)
+                    throw new InvalidOperationException(
+                        $"Facade '{GetType().FullName}' registers bridge '{bridgeType.FullName}', " +
+                        $"but its destination '{bridge.DestinationFacadeType.FullName}' is not a registered direct child. " +
+                        "Include that child in the composition or remove the bridge registration.");
+
+                bridge.Facade = destination;
             }
         }
 
-        internal TBridge? ResolveChildBridge<TBridge>()
+        internal TBridge ResolveBridgeChild<TBridge>()
             where TBridge : RBridge
         {
-            return childBridgesDictionary.TryGetValue(
+            return bridgesChildDictionary.TryGetValue(
                 typeof(TBridge), out var bridge)
                     ? (TBridge)bridge
-                    : null;
+                    : throw new InvalidOperationException(
+                        $"Facade '{GetType().FullName}' has no registered child bridge of exact type '{typeof(TBridge).FullName}'. " +
+                        "Register that bridge in RegisterBridges().");
+        }
+
+        internal static void ValidateFacadeParentContract<TContract>()
+            where TContract : class, IRFacade
+        {
+            if (!typeof(TContract).IsInterface)
+                throw new ArgumentException(
+                    $"Parent facade contract '{typeof(TContract).FullName}' must be an interface inheriting IRFacade.");
         }
 
         internal TContract? ResolveFacadeParentByContract<TContract>()
             where TContract : class, IRFacade
         {
-            if (!typeof(TContract).IsInterface)
-                return null;
-
-            return parentFacade as TContract;
+            ValidateFacadeParentContract<TContract>();
+            return facadeParent as TContract;
         }
 
-        internal TFacade? ResolveFacadeChild<TFacade>()
+        internal TFacade ResolveFacadeChild<TFacade>()
             where TFacade : RFacade
         {
-            foreach (var child in childFacades)
+            foreach (var child in facadeChildren)
             {
                 if (child.GetType() == typeof(TFacade))
                     return (TFacade)child;
             }
 
-            return null;
+            throw new InvalidOperationException(
+                $"Facade '{GetType().FullName}' has no registered direct child of exact type '{typeof(TFacade).FullName}'. " +
+                "Declare that exact child type in the composition; base types, self and siblings do not match.");
         }
 
-        protected TContract? GetFacadeParentByContract<TContract>()
-            where TContract : class, IRFacade
-            => ResolveFacadeParentByContract<TContract>();
 
-        protected TFacade? GetFacadeChild<TFacade>()
-            where TFacade : RFacade
-            => ResolveFacadeChild<TFacade>();
 
-        protected void Execute(RCommandBase command)
-            => Execute(command, GetType().FullName);
+        /// <summary>
+        /// Submits one ordered batch of independent roots in this facade.
+        /// Separate calls can overlap; prefer one root per gateway invocation.
+        /// </summary>
+        protected void Execute(params RCommandBase[] commands)
+            => Execute(commands, GetType().FullName);
 
         // Resolve the exact declared contract; inherited contracts are separate registrations.
         public static void RegisterActor<TActor>(IRContract actor)
             where TActor : class, IRContract
         {
-            RActorRegistry.ValidateActor<TActor>(actor);
+            RActorRegistry.ValidateActorRegistration<TActor>(actor);
             RActorRegistry.AttachActor(FindContractMediator(typeof(TActor)), actor);
         }
 
@@ -260,7 +388,7 @@ namespace RMVC
             where TFacade : RFacade
             where TActor : class, IRContract
         {
-            RActorRegistry.ValidateActor<TActor>(actor);
+            RActorRegistry.ValidateActorRegistration<TActor>(actor);
             RActorRegistry.AttachActor(FindContractMediator(typeof(TFacade), typeof(TActor)), actor);
         }
 
@@ -328,6 +456,7 @@ namespace RMVC
                 return;
 
             logMessage = "[RMVC] " + logMessage;
+
             Debug.WriteLine($"{logMessage}");
             Console.WriteLine($"{logMessage}");
         }
@@ -335,7 +464,8 @@ namespace RMVC
         public static void AbortCommands<TFacade>() where TFacade : RFacade
             => operations.AbortCommands(typeof(TFacade));
 
-        public void AbortAllCommands()
+        /// <summary>Requests cooperative cancellation application-wide; does not close admission or perform cleanup.</summary>
+        public static void AbortAllCommands()
             => operations.AbortAllCommands();
 
         internal static Task<bool> AbortAllOtherCommands(
@@ -343,23 +473,21 @@ namespace RMVC
             uint? timeoutMilliseconds)
             => operations.AbortAllOtherCommands(caller, timeoutMilliseconds);
 
-        private static void NotifyOperationState(bool started)
-        {
-            var shell = AppShell;
-
-            if (started)
-                shell?.HandleOperationsStarted();
-            else
-                shell?.HandleOperationsCompleted();
-        }
-
-        internal TModel? ResolveModel<TModel>()
+        internal TModel ResolveModel<TModel>()
             where TModel : class, IRModel
             => actors.ResolveModel<TModel>();
 
-        internal TMediator? ResolveMediator<TMediator>()
+        internal TMediator ResolveMediator<TMediator>()
             where TMediator : RMediator
             => actors.ResolveMediator<TMediator>();
+
+        internal TModel? ResolveModelOrNull<TModel>()
+            where TModel : class, IRModel
+            => actors.ResolveModelOrNull<TModel>();
+
+        internal TMediator? ResolveMediatorOrNull<TMediator>()
+            where TMediator : RMediator
+            => actors.ResolveMediatorOrNull<TMediator>();
 
         internal TContract? ResolveModelByContract<TContract>()
             where TContract : class
@@ -369,20 +497,11 @@ namespace RMVC
             where TContract : class
             => actors.ResolveMediatorByContract<TContract>();
 
-        internal void Execute(RCommandBase command, string? dispatchSource = null)
-        {
-            command.ReserveForExecution();
-
-            if (TryQueueCommands(new[] { command }, dispatchSource))
-                return;
-
-            // Models and mediators dispatch roots; commands execute children directly.
-            _ = DispatchCommandAsync(command, dispatchSource);
-        }
-
-        internal void ExecuteSequentially(
+        // Root submission is always an explicit batch; command-to-child overloads below
+        // retain their tracker, typed result and shared error/cancellation semantics.
+        internal void Execute(
             RCommandBase[] commands,
-            string? dispatchSource = null)
+            string? dispatchSource)
         {
             if (commands == null)
                 throw new ArgumentNullException(nameof(commands));
@@ -400,10 +519,11 @@ namespace RMVC
             }
 
             foreach (var command in sequence)
-            {
-                command.ReserveForExecution();
-            }
+                ValidateOrdinaryCommand(command);
 
+            foreach (var command in sequence)
+                command.ReserveForExecution();
+            
             if (TryQueueCommands(sequence, dispatchSource))
                 return;
 
@@ -424,72 +544,266 @@ namespace RMVC
             return command.RunInternal(tracker);
         }
 
-        public Task Initialise(object? initialisation)
+        internal void ValidateOrdinaryCommand(RCommandBase command)
         {
             lock (initialisationGate)
             {
-                if (initialisationState != InitialisationState.Awaiting)
+                if (command.GetType() == initialiseCommandType)
                 {
                     throw new InvalidOperationException(
-                        "Facade initialisation has already been requested.");
+                        $"Initialisation command '{command.GetType().FullName}' cannot be " +
+                        $"submitted through ordinary execution in facade '{GetType().FullName}'. " +
+                        "Return it from CreateInitialiseCommand().");
                 }
-
-                initialisationState = InitialisationState.Running;
             }
-
-            return InitialiseAsync(initialisation);
         }
 
-        private async Task InitialiseAsync(object? initialisation)
+        internal void ValidateInitialisationExecution(RCommandBase command)
+        {
+            lock (initialisationGate)
+            {
+                if (command.GetType() == initialiseCommandType
+                    && !ReferenceEquals(command, initialiseCommand))
+                {
+                    throw new InvalidOperationException(
+                        $"Command '{command.GetType().FullName}' is not the selected " +
+                        $"initialisation command for facade '{GetType().FullName}'.");
+                }
+            }
+        }
+
+        internal void BeginInitialisationBody(RCommandBase command)
+        {
+            lock (initialisationGate)
+            {
+                if (ReferenceEquals(command, initialiseCommand))
+                    acceptingChildInitialisations = true;
+            }
+        }
+
+        internal void EndInitialisationBody(RCommandBase command)
+        {
+            lock (initialisationGate)
+            {
+                if (ReferenceEquals(command, initialiseCommand))
+                    acceptingChildInitialisations = false;
+            }
+        }
+
+        internal void StageChildInitialisation(
+            RCommandBase caller, Type childType, IRInitialisation? initialisation)
+        {
+            lock (initialisationGate)
+            {
+                if (!ReferenceEquals(caller, initialiseCommand)
+                    || !acceptingChildInitialisations)
+                {
+                    throw new InvalidOperationException(
+                        $"Facade '{GetType().FullName}': InitialiseFacadeChild may only be " +
+                        "called from its selected initialisation command's Run() method.");
+                }
+
+                if (caller.Tracker == null || caller.Tracker.ErrorOrAbort)
+                    throw new InvalidOperationException(
+                        $"Facade '{GetType().FullName}' cannot schedule child initialisation after an error or abort.");
+
+                bool registered = false;
+
+                foreach (var child in facadeChildren)
+                {
+                    if (child.GetType() == childType)
+                    {
+                        registered = true;
+                        break;
+                    }
+                }
+
+                if (!registered)
+                    throw new InvalidOperationException(
+                        $"Facade '{GetType().FullName}' has no direct child registered as '{childType.FullName}'.");
+
+                if (childInitialisations.ContainsKey(childType))
+                    throw new InvalidOperationException(
+                        $"Facade '{GetType().FullName}' has already scheduled initialisation " +
+                        $"for child '{childType.FullName}'.");
+
+                childInitialisations.Add(childType, initialisation);
+            }
+        }
+
+        private async Task InitialiseChildrenAsync(CancellationToken token)
+        {
+            var requests = new List<KeyValuePair<RFacade, IRInitialisation?>>();
+
+            lock (initialisationGate)
+            {
+                var missing = new List<string>();
+
+                foreach (var child in facadeChildren)
+                {
+                    if (!childInitialisations.TryGetValue(child.GetType(), out var payload))
+                        missing.Add(child.GetType().FullName ?? child.GetType().Name);
+                    else
+                        requests.Add(new KeyValuePair<RFacade, IRInitialisation?>(child, payload));
+                }
+
+                if (missing.Count > 0)
+                    throw new InvalidOperationException(
+                        $"Facade '{GetType().FullName}' did not schedule initialisation for: " +
+                        $"{string.Join(", ", missing)}. Call InitialiseFacadeChild<TChild>() " +
+                        "for every registered direct child; supply a payload if required.");
+
+                childInitialisations.Clear();
+            }
+
+            foreach (var request in requests)
+            {
+                token.ThrowIfCancellationRequested();
+
+                await request.Key.InitialiseAsync(request.Value, token).ConfigureAwait(false);
+            }
+
+            token.ThrowIfCancellationRequested();
+        }
+
+        private async Task InitialiseAsync(
+            IRInitialisation? initialisation, 
+            CancellationToken parentToken)
         {
             try
             {
-                RCommandBase command = CreateInitialiseCommand(initialisation)
-                    ?? throw new InvalidOperationException("An initialise command is required.");
-
-                command.ReserveForExecution();
-
-                bool succeeded = await DispatchCommandAsync(
-                    command,
-                    "initialisation").ConfigureAwait(false);
-
-                if (!succeeded)
-                {
-                    string message = command.Tracker?.GetLatestError()?.Message
-                        ?? "Facade initialisation was aborted or could not execute.";
-
-                    throw new InvalidOperationException(message);
-                }
-
                 lock (initialisationGate)
                 {
-                    initialisationState = InitialisationState.Draining;
+                    if (initialisationState != InitialisationState.Awaiting)
+                        throw new InvalidOperationException(
+                            $"Facade '{GetType().FullName}' initialisation has already been requested.");
+
+                    initialisationState = InitialisationState.Running;
                 }
+
+                parentToken.ThrowIfCancellationRequested();
+
+                RCommandBase command = CreateInitialiseCommand(initialisation)
+                    ?? throw new InvalidOperationException("CreateInitialiseCommand() returned null.");
+                
+                lock (initialisationGate)
+                {
+                    initialiseCommandType = command.GetType();
+                    initialiseCommand = command;
+                }
+
+                command.ReserveForExecution();
+                
+                bool succeeded = await DispatchCommandAsync(
+                    command, "initialisation", parentToken).ConfigureAwait(false);
+                
+                if (!succeeded)
+                    throw initialisationFailure ?? new InvalidOperationException(
+                        command.Tracker?.GetLatestError()?.Message
+                        ?? $"Facade '{GetType().FullName}' initialisation was aborted or could not execute.");
+
+                lock (initialisationGate)
+                    initialisationState = InitialisationState.Initialised;
             }
+            catch (FacadeInitialisationException) { throw; }
             catch (Exception error)
+            {
+                throw new FacadeInitialisationException(GetType(), error);
+            }
+            finally
             {
                 lock (initialisationGate)
                 {
-                    initialisationFailure = error;
-                    initialisationState = InitialisationState.Failed;
-                    pendingCommands.Clear();
+                    acceptingChildInitialisations = false;
+                    initialiseCommand = null;
+                    childInitialisations.Clear();
                 }
+            }
+        }
 
-                try
+        private async Task InitialiseCompositionAsync()
+        {
+            var composition = new List<RFacade> { this };
+            composition.AddRange(facadeChildren);
+            
+            try
+            {
+                await InitialiseAsync(null, CancellationToken.None).ConfigureAwait(false);
+                foreach (var facade in composition)
                 {
-                    AppShell?.HandleInitialisationFailed(
-                        GetType().FullName ?? GetType().Name,
-                        error.Message);
+                    lock (facade.initialisationGate)
+                        facade.initialisationState = InitialisationState.Draining;
                 }
-                catch (Exception notificationError)
-                {
-                    Log($"INITIALISATION NOTIFICATION ERROR: {notificationError}");
-                }
+                if (application.Running())
+                    foreach (var facade in composition)
+                        _ = facade.DrainPendingCommandsAsync();
+            }
+            catch (Exception error)
+            {
+                await HandleStartupFailureAsync(
+                    composition, 
+                    error,
+                    (error as FacadeInitialisationException)?.FacadeName
+                        ?? GetType().FullName ?? GetType().Name,
+                    "Initialisation").ConfigureAwait(false);
+            }
+            finally { startupFinished.TrySetResult(true); }
+        }
 
-                throw;
+        private static async Task HandleStartupFailureAsync(
+            IReadOnlyList<RFacade> composition,
+            Exception error,
+            string facadeName,
+            string stage,
+            IEnumerable<Type>? unpublishedTypes = null)
+        {
+            if (application.ShutdownRequested) return;
+            application.CloseAdmission();
+            foreach (var facade in composition)
+            {
+                lock (facade.initialisationGate)
+                {
+                    facade.initialisationFailure = error;
+                    facade.initialisationState = InitialisationState.Failed;
+                    facade.childInitialisations.Clear();
+                    facade.pendingCommands.Clear();
+                }
             }
 
-            _ = DrainPendingCommandsAsync();
+            var cleanupFailures = new List<Exception>();
+            for (int index = composition.Count - 1; index >= 0; index--)
+            {
+                var failures = await composition[index].actors.CleanupModels().ConfigureAwait(false);
+                cleanupFailures.AddRange(failures);
+            }
+
+            string message = error.Message + Environment.NewLine + "Startup stage: " + stage;
+            Exception failure = error;
+            if (cleanupFailures.Count > 0)
+            {
+                var causes = new List<Exception> { error };
+                causes.AddRange(cleanupFailures);
+                failure = new AggregateException(
+                    "Startup failed and model cleanup reported additional failures.", causes);
+                message += Environment.NewLine + Environment.NewLine + "Model cleanup failures:";
+                foreach (var cleanupFailure in cleanupFailures)
+                    message += Environment.NewLine + cleanupFailure.Message;
+                foreach (var facade in composition)
+                    lock (facade.initialisationGate)
+                        facade.initialisationFailure = failure;
+            }
+
+            if (unpublishedTypes != null)
+            {
+                // Do not release instances whose resource cleanup may be incomplete.
+                if (cleanupFailures.Count == 0)
+                    foreach (var facade in composition)
+                        facade.actors.ReleaseOwnership();
+                ReleaseFacadeReservations(unpublishedTypes);
+            }
+
+            Log($"STARTUP FAILED: facade={facadeName}; stage={stage}; error={failure}");
+            application.StartupFailed("Facade: " + facadeName + Environment.NewLine + message);
         }
 
         private bool TryQueueCommands(
@@ -498,10 +812,12 @@ namespace RMVC
         {
             lock (initialisationGate)
             {
+                if (!application.AcceptingCommands)
+                    throw new InvalidOperationException("Cannot execute commands: application startup failed or shutdown has begun.", initialisationFailure);
                 if (initialisationState == InitialisationState.Failed)
                 {
                     throw new InvalidOperationException(
-                        "Cannot execute commands after facade initialisation failed.",
+                        "Cannot execute commands after facade startup failed.",
                         initialisationFailure);
                 }
 
@@ -523,6 +839,7 @@ namespace RMVC
 
                 lock (initialisationGate)
                 {
+                    if (!application.AcceptingCommands) { pendingCommands.Clear(); return; }
                     if (pendingCommands.Count == 0)
                     {
                         initialisationState = InitialisationState.Ready;
@@ -553,9 +870,12 @@ namespace RMVC
 
         private async Task<bool> DispatchCommandAsync(
             RCommandBase command,
-            string? dispatchSource)
+            string? dispatchSource,
+            CancellationToken parentInitialisationToken = default)
         {
-            using (var source = new CancellationTokenSource())
+            using (var source = parentInitialisationToken.CanBeCanceled
+                ? CancellationTokenSource.CreateLinkedTokenSource(parentInitialisationToken)
+                : new CancellationTokenSource())
             {
                 var tracker = new RTracker(command, this, 100d, source.Token);
 
@@ -603,12 +923,17 @@ namespace RMVC
                                 Log($"ROOT START: command={command.GetType().FullName}; source={dispatchSource ?? "facade"}; commandId={tracker.CommandId}; commandRootId={tracker.CommandRootId}; facade={GetType().FullName}; thread={Environment.CurrentManagedThreadId}.");
 
                             await command.ExecuteUntypedInternal(tracker).ConfigureAwait(false);
+
+                            if (ReferenceEquals(command, initialiseCommand) && !tracker.ErrorOrAbort)
+                                await InitialiseChildrenAsync(tracker.Token).ConfigureAwait(false);
                         }
                         catch (Exception ex)
                         {
                             Log($"ROOT EXECUTION ERROR: command={command.GetType().FullName}; commandId={tracker.CommandId}; commandRootId={tracker.CommandRootId}; facade={GetType().FullName}; {ex}");
 
-                            command.SetErrorInternal("RFacade Execution Error.", ex.ToString());
+                            if (ReferenceEquals(command, initialiseCommand))
+                                initialisationFailure = ex;
+                            command.SetErrorInternal(ex.Message, ex.ToString());
                         }
                     }).ConfigureAwait(false);
                 }
@@ -639,34 +964,27 @@ namespace RMVC
             }
         }
 
-        // Every Facade provides its own initialise command.
-        protected abstract RCommandBase CreateInitialiseCommand(object? initialisation);
+        /// <summary>Creates the one-time initialiser. Its concrete type is reserved for initialisation in this facade.</summary>
+        protected abstract RCommandBase CreateInitialiseCommand(IRInitialisation? initialisation);
+        /// <summary>Supplies mediators during the one registration attempt. Do not call as a lookup.</summary>
         protected abstract RMediator[] RegisterMediators();
+        /// <summary>Supplies models during the one registration attempt. Keep construction lightweight; do not call as a lookup.</summary>
         protected abstract IRModel[] RegisterModels();
 
-        protected TMediator? Mediator<TMediator>()
-            where TMediator : RMediator
-            => ResolveMediator<TMediator>();
 
-        protected TModel? Model<TModel>()
-            where TModel : class, IRModel
-            => ResolveModel<TModel>();
 
-        protected TContract? MediatorByContract<TContract>()
-            where TContract : class
-            => ResolveMediatorByContract<TContract>();
 
-        protected TContract? ModelByContract<TContract>()
-            where TContract : class
-            => ResolveModelByContract<TContract>();
+
+
 
         // Composition is flat: the parent owns progress; standalone facades own theirs.
-        private RFacade ProgressOwner => parentFacade ?? this;
+        private RFacade ProgressOwner => facadeParent ?? this;
 
         private async Task HandleRootComplete(RCommandBase command)
         {
-            if (!command.HasParent &&
+            if (!command.HasCommandParent &&
                 command.ReportsProgress &&
+                command.Tracker?.IsShutdownCoordinator != true &&
                 command.Tracker?.ProgressRequested == true)
             {
                 await command.Tracker.Facade.HandleProgressComplete(
@@ -695,7 +1013,6 @@ namespace RMVC
 
             if (command != null)
                 await owner.ExecuteProgressCallback(command).ConfigureAwait(false);
-            
         }
 
         internal async Task HandleProgressChange(string commandRootId, RProgress[] progress)
@@ -709,6 +1026,7 @@ namespace RMVC
 
         private async Task ExecuteProgressCallback(RCommandBase command)
         {
+            ValidateOrdinaryCommand(command);
             command.ReserveForExecution();
 
             command.IsProgressCallback = true;
@@ -722,16 +1040,18 @@ namespace RMVC
                 Log($"PROGRESS CALLBACK ERROR: command={command.GetType().FullName}; commandId={tracker.CommandId}; commandRootId={tracker.CommandRootId}; facade={GetType().FullName}; error={tracker.GetLatestError()?.Message ?? string.Empty}.");
         }
 
+        /// <summary>Supplies child gateways during the one bridge registration attempt.</summary>
         protected virtual RBridge[] RegisterBridges()
             => [];
 
+        /// <summary>Creates a fresh command for each progress update; called repeatedly, or return null to omit reporting.</summary>
         protected virtual RCommandBase? CreateProgressUpdateCommand(
             string commandRootId, RProgress[] progress)
             => null;
         
+        /// <summary>Creates a fresh command for each root's reporting completion; called repeatedly, or return null.</summary>
         protected virtual RCommandBase? CreateProgressCompleteCommand(
             string commandRootId)
             => null;
-
     }
 }

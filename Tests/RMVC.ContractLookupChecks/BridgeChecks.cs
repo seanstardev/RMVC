@@ -1,4 +1,4 @@
-﻿using RMVC;
+using RMVC;
 
 namespace RMVC.ContractLookupChecks
 {
@@ -14,10 +14,30 @@ namespace RMVC.ContractLookupChecks
 
         internal static async Task Run()
         {
+            new UnboundProbe().Verify();
             RFacade.Create<Host>(new Shell(),
                 RFacade.Child<Destination>(), RFacade.Child<OtherDestination>());
 
             await finished.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        private sealed class UnboundProbe : RCommand<RVoid>
+        {
+            internal void Verify()
+            {
+                Program.Check(Program.ThrowsLookup(() => FacadeChild<Destination>(), "not bound", typeof(Destination).FullName!),
+                    "required child lookup rejects unbound commands and names the requested type");
+                Program.Check(Program.ThrowsLookup(() => BridgeChild<Gateway<Destination>>(), "not bound", typeof(Gateway<Destination>).FullName!),
+                    "required bridge lookup rejects unbound commands and names the requested type");
+                Program.Check(typeof(RCommandBase).GetMethods(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                    .All(method => method.Name is not "FacadeChildOrNull" and not "BridgeChildOrNull"),
+                    "child and bridge lookup expose no optional variants");
+                Program.Check(FacadeParentByContract<IHostCapability>() == null,
+                    "valid optional parent contract remains null before binding");
+                Program.Check(Program.RejectsClassContract(() => FacadeParentByContract<Host>(), typeof(Host)),
+                    "invalid parent class contract throws even before binding");
+            }
+            protected override Task<RVoid> Run() => Complete();
         }
 
         public interface IHostCapability : IRFacade
@@ -52,7 +72,7 @@ namespace RMVC.ContractLookupChecks
 
             protected override RMediator[] RegisterMediators() => [];
 
-            protected override RCommandBase CreateInitialiseCommand(object? initialisation)
+            protected override RCommandBase CreateInitialiseCommand(IRInitialisation? initialisation)
                 => new IncrementCmd();
         }
 
@@ -67,10 +87,9 @@ namespace RMVC.ContractLookupChecks
             protected override IRModel[] RegisterModels() => [State];
 
             protected override RBridge[] RegisterBridges()
-                => [new Gateway<Destination>(), new Gateway<OtherDestination>(),
-                    new Gateway<MissingDestination>()];
+                => [new Gateway<Destination>(), new Gateway<OtherDestination>()];
 
-            protected override RCommandBase CreateInitialiseCommand(object? initialisation)
+            protected override RCommandBase CreateInitialiseCommand(IRInitialisation? initialisation)
                 => new StartCmd();
         }
 
@@ -83,7 +102,7 @@ namespace RMVC.ContractLookupChecks
 
             protected override IRModel[] RegisterModels() => [State];
 
-            protected override RCommandBase CreateInitialiseCommand(object? initialisation)
+            protected override RCommandBase CreateInitialiseCommand(IRInitialisation? initialisation)
                 => new InitialiseDestinationCmd();
         }
 
@@ -95,7 +114,7 @@ namespace RMVC.ContractLookupChecks
 
             protected override IRModel[] RegisterModels() => [State];
 
-            protected override RCommandBase CreateInitialiseCommand(object? initialisation)
+            protected override RCommandBase CreateInitialiseCommand(IRInitialisation? initialisation)
                 => new NoOpCmd();
         }
 
@@ -103,15 +122,15 @@ namespace RMVC.ContractLookupChecks
         {
             protected override Task<RVoid> Run()
             {
-                Program.Check(GetFacadeParentByContract<IHostCapability>() is Host
-                    && GetFacadeParentByContract<Host>() == null
-                    && GetFacadeParentByContract<HostBase>() == null,
+                Program.Check(FacadeParentByContract<IHostCapability>() is Host
+                    && Program.RejectsClassContract(() => FacadeParentByContract<Host>(), typeof(Host))
+                    && Program.RejectsClassContract(() => FacadeParentByContract<HostBase>(), typeof(HostBase)),
                     "parent lookup accepts interface contracts and rejects concrete/base facade classes");
-                Program.Check(GetFacadeChild<OtherDestination>() == null
-                    && GetFacadeParentByContract<ISharedChild>() == null,
+                Program.Check(Program.ThrowsLookup(() => FacadeChild<OtherDestination>(), "direct child", typeof(OtherDestination).FullName!)
+                    && FacadeParentByContract<ISharedChild>() == null,
                     "child lookups cannot discover a sibling or use one as a parent fallback");
 
-                GetFacadeParentByContract<IHostCapability>()!.RequestHostOperation();
+                FacadeParentByContract<IHostCapability>()!.RequestHostOperation();
                 Destination.Initialised = true;
                 return Complete();
             }
@@ -119,10 +138,14 @@ namespace RMVC.ContractLookupChecks
 
         private sealed class HostOperationCmd : RCommand<RVoid>
         {
-            protected override Task<RVoid> Run()
+            protected override async Task<RVoid> Run()
             {
                 try
                 {
+                    await executed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                    Program.Check(Destination.Initialised && Destination.State.Value == 1
+                        && OtherDestination.State.Value == 1 && Host.State.Value == 0,
+                        "multiple gateways execute against their exact destination after initialisation");
                     Program.Check(ReferenceEquals(Model<Counter>(), Host.State),
                         "parent facade capability dispatch creates a root in the parent's registry");
                     finished.TrySetResult();
@@ -132,7 +155,7 @@ namespace RMVC.ContractLookupChecks
                     finished.TrySetException(error);
                 }
 
-                return Complete();
+                return await Complete();
             }
         }
 
@@ -145,7 +168,7 @@ namespace RMVC.ContractLookupChecks
         {
             protected override Task<RVoid> Run()
             {
-                Model<Counter>()!.Value++;
+                Model<Counter>().Value++;
 
                 if (Interlocked.Increment(ref executionCount) == 2)
                     executed.TrySetResult();
@@ -156,22 +179,22 @@ namespace RMVC.ContractLookupChecks
 
         private sealed class StartCmd : RCommand<RVoid>
         {
-            protected override async Task<RVoid> Run()
+            protected override Task<RVoid> Run()
             {
                 try
                 {
-                    Program.Check(GetFacadeParentByContract<IRFacade>() == null,
+                    Program.Check(FacadeParentByContract<IRFacade>() == null,
                         "a composition root has no implicit parent");
-                    Program.Check(GetFacadeChild<Destination>() is Destination
-                        && GetFacadeChild<RFacade>() == null
-                        && GetFacadeChild<Host>() == null,
+                    Program.Check(FacadeChild<Destination>() is Destination
+                        && Program.ThrowsLookup(() => FacadeChild<RFacade>(), "exact type", typeof(RFacade).FullName!)
+                        && Program.ThrowsLookup(() => FacadeChild<Host>(), "direct child", typeof(Host).FullName!),
                         "child lookup matches exact concrete types without base-class or self fallback");
 
                     bool interfaceRejected = false;
 
                     try
                     {
-                        typeof(RCommandBase).GetMethod("GetFacadeChild",
+                        typeof(RCommandBase).GetMethod("FacadeChild",
                             System.Reflection.BindingFlags.Instance
                                 | System.Reflection.BindingFlags.NonPublic)!
                             .MakeGenericMethod(typeof(IUniqueChild));
@@ -184,36 +207,31 @@ namespace RMVC.ContractLookupChecks
                     Program.Check(interfaceRejected,
                         "child lookup's generic constraint excludes facade interfaces");
 
-                    var first = ChildBridge<Gateway<Destination>>();
-                    Program.Check(first != null
-                        && ReferenceEquals(first, ChildBridge<Gateway<Destination>>())
+                    Program.Check(Program.ThrowsLookup(() => BridgeChild<RBridge>(), "exact type", typeof(RBridge).FullName!),
+                        "bridge lookup does not fall back to a registered derived bridge");
+                    var first = BridgeChild<Gateway<Destination>>();
+                    Program.Check(ReferenceEquals(first, BridgeChild<Gateway<Destination>>())
                         && Gateway<Destination>.Instances == 1,
                         "bridge lookup retains the registered instance");
 
-                    first!.Increment();
-                    ChildBridge<Gateway<OtherDestination>>()!.Increment();
-                    ChildBridge<Gateway<MissingDestination>>()!.Increment();
+                    first.Increment();
+                    BridgeChild<Gateway<OtherDestination>>().Increment();
 
                     Program.Check(Destination.State.Value == 0 && !Destination.Initialised
                         && OtherDestination.State.Value == 0 && Host.State.Value == 0,
                         "early bridge roots queue on their destinations without running in the host");
 
-                    await GetFacadeChild<Destination>()!.Initialise(null);
-                    await GetFacadeChild<OtherDestination>()!.Initialise(null);
-                    await executed.Task.WaitAsync(TimeSpan.FromSeconds(5));
-
-                    Program.Check(Destination.Initialised && Destination.State.Value == 1
-                        && OtherDestination.State.Value == 1 && Host.State.Value == 0,
-                        "multiple gateways execute against their exact destination after initialisation");
-                    Program.Check(ChildBridge<Gateway<Host>>() == null,
-                        "unregistered bridge lookup returns null");
+                    InitialiseFacadeChild<Destination>();
+                    InitialiseFacadeChild<OtherDestination>();
+                    Program.Check(Program.ThrowsLookup(() => BridgeChild<Gateway<Host>>(), "RegisterBridges", typeof(Gateway<Host>).FullName!),
+                        "unregistered required bridge lookup throws and explains registration");
                 }
                 catch (Exception error)
                 {
                     finished.TrySetException(error);
                 }
 
-                return await Complete();
+                return Complete();
             }
         }
     }

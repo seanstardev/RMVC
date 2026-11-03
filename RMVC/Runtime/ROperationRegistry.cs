@@ -1,18 +1,18 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace RMVC
 {
-    /// <summary>Owns active root registration, cancellation waits and ordered operation notifications.</summary>
+    /// <summary>Owns active root registration, cancellation waits and shutdown draining.</summary>
     internal sealed class ROperationRegistry
     {
         private readonly object operationGate = new object();
         private readonly Dictionary<CancellationTokenSource, RTracker> activeOperations =
             new Dictionary<CancellationTokenSource, RTracker>();
-        private readonly Queue<bool> operationNotifications = new Queue<bool>();
-        private bool deliveringOperationNotifications;
+        private bool accepting = true;
+        private TaskCompletionSource<bool>? drain;
 
         private TaskCompletionSource<bool>? abortWait;
 
@@ -20,11 +20,45 @@ namespace RMVC
 
         private int outstandingCancellationPasses;
 
-        private readonly Action<bool> notifyOperationState;
+        private RTracker? shutdownCoordinator;
 
-        internal ROperationRegistry(Action<bool> notifyOperationState)
+        internal void CloseAdmission(RTracker? coordinator = null)
         {
-            this.notifyOperationState = notifyOperationState;
+            lock (operationGate)
+            {
+                if (coordinator != null)
+                {
+                    bool registered = false;
+                    foreach (var tracker in activeOperations.Values)
+                        if (tracker.SameRoot(coordinator)) registered = true;
+                    if (!registered)
+                        throw new InvalidOperationException("Shutdown requires an active ordinary command root; progress callbacks cannot coordinate shutdown.");
+                    coordinator.RestrictToShutdown();
+                    shutdownCoordinator = coordinator;
+                }
+                accepting = false;
+            }
+        }
+
+        // The coordinator remains registered, but is restricted to Shell-only completion.
+        private bool HasDrained()
+        {
+            if (outstandingCancellationPasses != 0) return false;
+            foreach (var tracker in activeOperations.Values)
+                if (shutdownCoordinator == null || !tracker.SameRoot(shutdownCoordinator)) return false;
+            return true;
+        }
+
+        internal Task Drain()
+        {
+            lock (operationGate)
+            {
+                if (HasDrained())
+                    return Task.CompletedTask;
+                if (drain == null)
+                    drain = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                return drain.Task;
+            }
         }
 
         internal void AbortCommands(Type facadeType)
@@ -140,6 +174,12 @@ namespace RMVC
         // Called while operationGate is held.
         private void TryCompleteAbortWait()
         {
+            if (HasDrained())
+            {
+                drain?.TrySetResult(true);
+                drain = null;
+            }
+
             if (abortWait != null
                 && outstandingCancellationPasses == 0
                 && activeOperations.Count == 1)
@@ -165,8 +205,14 @@ namespace RMVC
         {
             foreach (var source in operations)
             {
-                try 
-                { 
+                try
+                {
+                    lock (operationGate)
+                    {
+                        if (shutdownCoordinator != null && activeOperations.TryGetValue(source, out var tracker)
+                            && tracker.SameRoot(shutdownCoordinator))
+                            continue;
+                    }
                     source.Cancel(); 
                 }
                 catch (ObjectDisposedException)
@@ -191,6 +237,7 @@ namespace RMVC
             
             lock (operationGate)
             {
+                if (!accepting) return false;
                 if (!allowConcurrentRoots)
                 {
                     foreach (var active in activeOperations.Values)
@@ -204,14 +251,12 @@ namespace RMVC
                 activeOperations.Add(source, tracker);
                 activeCount = activeOperations.Count;
 
-                if (activeOperations.Count == 1)
-                    operationNotifications.Enqueue(true);
 
             }
+
             if (activeCount > 1)
                 RFacade.Log($"ROOTS CONCURRENT: activeCount={activeCount}.");
 
-            DeliverOperationNotifications();
 
             return true;
         }
@@ -220,49 +265,11 @@ namespace RMVC
         {
             lock (operationGate)
             {
-                if (activeOperations.Remove(source) && activeOperations.Count == 0)
-                    operationNotifications.Enqueue(false);
+                activeOperations.Remove(source);
 
                 TryCompleteAbortWait();
             }
 
-            DeliverOperationNotifications();
-        }
-
-        private void DeliverOperationNotifications()
-        {
-            lock (operationGate)
-            {
-                if (deliveringOperationNotifications || operationNotifications.Count == 0)
-                    return;
-
-                deliveringOperationNotifications = true;
-            }
-
-            while (true)
-            {
-                bool started;
-
-                lock (operationGate)
-                {
-                    if (operationNotifications.Count == 0)
-                    {
-                        deliveringOperationNotifications = false;
-                        return;
-                    }
-                    started = operationNotifications.Dequeue();
-                }
-
-                // Serialise notifications, but never call application code under the tracking lock.
-                try
-                {
-                    notifyOperationState(started);
-                }
-                catch (Exception ex)
-                {
-                    RFacade.Log($"OPERATION NOTIFICATION ERROR: started={started}; {ex}");
-                }
-            }
         }
 
     }

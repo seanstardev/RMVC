@@ -15,12 +15,32 @@ namespace RMVC.ContractLookupChecks
         private static TaskCompletionSource NewCompletion()
             => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        internal static async Task Run()
+        internal static async Task Run(string mode = "host")
         {
             Program.Check(typeof(RFacade).GetMethod("Configure") == null,
                 "progress ownership needs no public Configure method");
 
-            RFacade.Create<Host>(null, RFacade.Child<ReportingChild>());
+            if (mode == "silent")
+            {
+                RFacade.Create<SilentHost>(new Shell(), RFacade.Child<UnhandledChild>());
+                await silentFinished.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                lock (gate)
+                    Program.Check(received.Count == 0 && childFactories == 0,
+                        "a parent without callbacks does not search its reporting child");
+                return;
+            }
+            if (mode == "standalone")
+            {
+                RFacade.Create<Standalone>(new Shell());
+                await standaloneFinished.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                lock (gate)
+                    Program.Check(received.Any(x => x.Owner == "standalone" && x.Kind == "update")
+                        && received.Any(x => x.Owner == "standalone" && x.Kind == "complete")
+                        && received.All(x => x.Owner == "standalone"),
+                        "a standalone application owns its progress");
+                return;
+            }
+            RFacade.Create<Host>(new Shell(), RFacade.Child<ReportingChild>());
             await hostFinished.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
             lock (gate)
@@ -51,26 +71,6 @@ namespace RMVC.ContractLookupChecks
             Program.Check(childFactories == 0,
                 "a child with its own handlers cannot override parent progress ownership");
 
-            int before;
-            lock (gate) before = received.Count;
-
-            RFacade.Create<SilentHost>(null, RFacade.Child<UnhandledChild>());
-            await silentFinished.Task.WaitAsync(TimeSpan.FromSeconds(10));
-
-            lock (gate)
-                Program.Check(received.Count == before && childFactories == 0,
-                    "a parent without callbacks does not search children or another composition");
-
-            RFacade.Create<Standalone>();
-            await standaloneFinished.Task.WaitAsync(TimeSpan.FromSeconds(10));
-
-            lock (gate)
-            {
-                Program.Check(received.Skip(before).Any(item => item.Owner == "standalone" && item.Kind == "update")
-                    && received.Skip(before).Any(item => item.Owner == "standalone" && item.Kind == "complete")
-                    && received.Skip(before).All(item => item.Owner == "standalone"),
-                    "a later standalone composition owns its progress independently of earlier parents");
-            }
         }
 
         public sealed class OwnerModel : RModel
@@ -84,8 +84,8 @@ namespace RMVC.ContractLookupChecks
         {
             protected override IRModel[] RegisterModels() => [new OwnerModel("host")];
             protected override RMediator[] RegisterMediators() => [];
-            protected override RCommandBase CreateInitialiseCommand(object? initialisation)
-                => new InitialiseChild<ReportingChild>(hostFinished);
+            protected override RCommandBase CreateInitialiseCommand(IRInitialisation? initialisation)
+                => new InitialiseChild<ReportingChild>();
             protected override RCommandBase? CreateProgressUpdateCommand(string commandRootId, RProgress[] progress)
             {
                 lock (gate)
@@ -94,22 +94,22 @@ namespace RMVC.ContractLookupChecks
                 return new Record("update", commandRootId);
             }
             protected override RCommandBase? CreateProgressCompleteCommand(string commandRootId)
-                => new Record("complete", commandRootId);
+                => new Record("complete", commandRootId, hostFinished);
         }
 
         public sealed class SilentHost : RFacade
         {
             protected override IRModel[] RegisterModels() => [];
             protected override RMediator[] RegisterMediators() => [];
-            protected override RCommandBase CreateInitialiseCommand(object? initialisation)
-                => new InitialiseChild<UnhandledChild>(silentFinished);
+            protected override RCommandBase CreateInitialiseCommand(IRInitialisation? initialisation)
+                => new InitialiseChild<UnhandledChild>();
         }
 
         public abstract class ChildWithHandlers : RFacade
         {
             protected override IRModel[] RegisterModels() => [new OwnerModel("child")];
             protected override RMediator[] RegisterMediators() => [];
-            protected override RCommandBase CreateInitialiseCommand(object? initialisation)
+            protected override RCommandBase CreateInitialiseCommand(IRInitialisation? initialisation)
                 => new ReportRoot();
             protected override RCommandBase? CreateProgressUpdateCommand(string commandRootId, RProgress[] progress)
             {
@@ -130,7 +130,7 @@ namespace RMVC.ContractLookupChecks
         {
             protected override IRModel[] RegisterModels() => [new OwnerModel("standalone")];
             protected override RMediator[] RegisterMediators() => [];
-            protected override RCommandBase CreateInitialiseCommand(object? initialisation)
+            protected override RCommandBase CreateInitialiseCommand(IRInitialisation? initialisation)
                 => new ReportRoot();
             protected override RCommandBase? CreateProgressUpdateCommand(string commandRootId, RProgress[] progress)
                 => new Record("update", commandRootId);
@@ -141,22 +141,10 @@ namespace RMVC.ContractLookupChecks
         private sealed class InitialiseChild<TChild> : RCommand<RVoid>
             where TChild : RFacade
         {
-            private readonly TaskCompletionSource finished;
-            public InitialiseChild(TaskCompletionSource finished) => this.finished = finished;
-
-            protected override async Task<RVoid> Run()
+            protected override Task<RVoid> Run()
             {
-                try
-                {
-                    await GetFacadeChild<TChild>()!.Initialise(null);
-                    finished.TrySetResult();
-                }
-                catch (Exception error)
-                {
-                    finished.TrySetException(error);
-                }
-
-                return await Complete();
+                InitialiseFacadeChild<TChild>();
+                return Complete();
             }
         }
 
@@ -165,6 +153,8 @@ namespace RMVC.ContractLookupChecks
             protected override async Task<RVoid> Run()
             {
                 await Execute(new ReportChild());
+                if (FacadeParentByContract<IRFacade>() is SilentHost)
+                    silentFinished.TrySetResult();
                 return await Complete();
             }
         }
@@ -195,7 +185,7 @@ namespace RMVC.ContractLookupChecks
             protected override Task<RVoid> Run()
             {
                 lock (gate)
-                    received.Add((Model<OwnerModel>()?.Value ?? "missing", kind, commandRootId));
+                    received.Add((Model<OwnerModel>().Value, kind, commandRootId));
 
                 finished?.TrySetResult();
                 return Complete();
