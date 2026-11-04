@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="300" viewBox="0 0 1000 300" role="img" aria-labelledby="title desc">
+<title id="title">An RMVC root operation composed from reusable commands</title>
+<desc id="desc">ImportCatalogueCmd awaits ReadCatalogueCmd, ValidateCatalogueCmd and SaveCatalogueCmd in sequence. Its child commands share the root's error history, cooperative cancellation and progress context. A command can itself be used as a root or as an awaited child.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#527087"/></marker></defs>
+<rect x="1" y="1" width="998" height="298" rx="16" fill="#f8fafc" stroke="#d4e0eb"/>
+<g font-family="Segoe UI, Arial, sans-serif">
+<text x="32" y="42" font-size="14" fill="#526b81" font-weight="600" letter-spacing="1">ONE ROOT. REUSABLE BUILDING BLOCKS.</text>
+<text x="32" y="78" font-size="22" fill="#16334b" font-weight="700">ImportCatalogueCmd</text>
+<g fill="#fff" stroke="#b8cadd"><rect x="32" y="111" width="280" height="112" rx="12"/><rect x="360" y="111" width="280" height="112" rx="12"/><rect x="688" y="111" width="280" height="112" rx="12"/></g>
+<g font-family="Consolas, monospace" font-size="16" fill="#16334b" font-weight="700"><text x="50" y="146">ReadCatalogueCmd</text><text x="378" y="146">ValidateCatalogueCmd</text><text x="706" y="146">SaveCatalogueCmd</text></g>
+<g font-size="14" fill="#455e73"><text x="50" y="174">Load and parse input</text><text x="378" y="174">Apply application rules</text><text x="706" y="174">Persist the accepted result</text></g>
+<g font-family="Consolas, monospace" font-size="12" fill="#166c77"><text x="50" y="202">await Execute(...)</text><text x="378" y="202">await Execute(...)</text><text x="706" y="202">await Execute(...)</text></g>
+<g fill="none" stroke="#527087" stroke-width="1.8" marker-end="url(#arrow)"><path d="M320 166 H350"/><path d="M648 166 H678"/></g>
+<text x="32" y="263" font-size="15" fill="#16334b">Shared error history</text><text x="310" y="263" font-size="15" fill="#16334b">Cooperative cancellation</text><text x="680" y="263" font-size="15" fill="#16334b">One progress context</text>
+</g></svg>

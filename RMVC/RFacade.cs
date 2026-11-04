@@ -243,23 +243,34 @@ namespace RMVC
         internal static Task ShutdownInternal(uint timeoutMilliseconds, RTracker? coordinator)
         {
             if (timeoutMilliseconds == uint.MaxValue)
-                throw new ArgumentOutOfRangeException(nameof(timeoutMilliseconds), "The maximum timer value is reserved; supply a finite budget below uint.MaxValue.");
+                throw new ArgumentOutOfRangeException(
+                    nameof(timeoutMilliseconds), 
+                    "The maximum timer value is reserved; supply a finite budget below uint.MaxValue.");
+            
             return application.Shutdown(timeoutMilliseconds, async () =>
             {
                 application.SetShutdownStage("waiting for startup to unwind");
                 operations.AbortAllCommands();
+                
                 await startupFinished.Task.ConfigureAwait(false);
+                
                 application.SetShutdownStage("draining command work");
                 operations.AbortAllCommands();
+                
                 await operations.Drain().ConfigureAwait(false);
+                
                 var failures = new List<Exception>();
+                
                 for (int index = composition.Count - 1; index >= 0; index--)
                 {
                     var facade = composition[index];
                     lock (facade.initialisationGate) facade.pendingCommands.Clear();
+                    
                     application.SetShutdownStage("cleaning models in " + facade.GetType().FullName);
+                    
                     failures.AddRange(await facade.actors.CleanupModels().ConfigureAwait(false));
                 }
+
                 // Construction may have been interrupted before publication. Release only
                 // successfully cleaned unpublished actors; creation itself stays consumed.
                 lock (registryGate)
@@ -268,6 +279,7 @@ namespace RMVC
                         foreach (var facade in composition)
                             if (!activeFacades.ContainsKey(facade.GetType()))
                                 facade.actors.ReleaseOwnership();
+                
                     pendingFacades.Clear();
                 }
                 return failures;

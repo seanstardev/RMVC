@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="440" viewBox="0 0 1000 440" role="img" aria-labelledby="title desc">
+<title id="title">RMVC: a typed journey between actors</title>
+<desc id="desc">A view raises events through its contract. A mediator submits a command. The command coordinates models and proxies and calls typed mediator presentation methods. Facade registers actors; the application CommandBase provides named actor access.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#527087"/></marker></defs>
+<rect x="1" y="1" width="998" height="438" rx="16" fill="#f8fafc" stroke="#d4e0eb"/>
+<g font-family="Segoe UI, Arial, sans-serif">
+<text x="32" y="42" font-size="14" fill="#526b81" font-weight="600" letter-spacing="1">FOLLOW THE OPERATION</text>
+<rect x="32" y="86" width="220" height="128" rx="12" fill="#fff" stroke="#b8cadd"/>
+<text x="52" y="122" font-size="21" fill="#16334b" font-weight="700">View</text>
+<text x="52" y="152" font-size="15" fill="#455e73">Owns presentation</text>
+<text x="52" y="184" font-size="13" fill="#166c77" font-family="Consolas, monospace">ICounterView</text>
+<rect x="332" y="86" width="240" height="128" rx="12" fill="#e8f5f4" stroke="#8abdb9"/>
+<text x="352" y="122" font-size="21" fill="#16334b" font-weight="700">Mediator</text>
+<text x="352" y="152" font-size="15" fill="#455e73">Events and presentation</text>
+<text x="352" y="184" font-size="13" fill="#166c77" font-family="Consolas, monospace">RMediator&lt;ICounterView&gt;</text>
+<rect x="652" y="86" width="316" height="128" rx="12" fill="#16334b" stroke="#16334b"/>
+<text x="672" y="122" font-size="21" fill="#fff" font-weight="700">Command</text>
+<text x="672" y="152" font-size="15" fill="#d6e5ef">Coordinates the operation</text>
+<text x="672" y="184" font-size="13" fill="#9fe1d8" font-family="Consolas, monospace">CommandBase&lt;TResult&gt;</text>
+<g fill="none" stroke="#527087" stroke-width="1.8" marker-end="url(#arrow)">
+<path d="M264 138 H320"/><path d="M320 178 H264"/>
+<path d="M584 138 H640"/><path d="M640 178 H584"/>
+<path d="M810 214 V266 H608 V302"/><path d="M810 266 H860 V302"/>
+</g>
+<g font-size="11" fill="#455e73" text-anchor="middle">
+<text x="292" y="125">event</text><text x="292" y="198">present</text>
+<text x="612" y="125">Execute</text><text x="612" y="198">methods</text>
+</g>
+<text x="824" y="247" text-anchor="start" font-size="13" fill="#455e73">typed actor access</text>
+<rect x="492" y="302" width="232" height="78" rx="10" fill="#fff" stroke="#b8cadd"/>
+<text x="510" y="332" font-size="19" fill="#16334b" font-weight="700">Model</text>
+<text x="510" y="357" font-size="14" fill="#455e73">Application state and rules</text>
+<rect x="748" y="302" width="220" height="78" rx="10" fill="#fff" stroke="#b8cadd"/>
+<text x="766" y="332" font-size="19" fill="#16334b" font-weight="700">Proxy</text>
+<text x="766" y="357" font-size="14" fill="#455e73">External capabilities</text>
+<text x="32" y="413" font-size="14" fill="#455e73">Facade registers actors. CommandBase gives commands their typed vocabulary.</text>
+</g></svg>
