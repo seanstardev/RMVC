@@ -1,5 +1,19 @@
 # Releasing RMVC
 
+## Confirm the checkout first
+
+The first message to the maintainer for every release must ask:
+
+> Please make sure the RMVC repository is up to date. Have you saved and committed
+> all the changes you want in this release, and is this the checkout and branch
+> you want me to release from?
+
+Wait for confirmation before changing release files, committing, tagging or
+publishing. Check the working tree, branch and remote. If there are pending
+changes or the branch has diverged, show the maintainer what you found and agree
+which commit to release. A clean working tree cannot confirm that editor buffers
+have been saved or that changes from another checkout have been included.
+
 ## Prepare
 
 1. Confirm the version and the exact framework changes going into it. Review
