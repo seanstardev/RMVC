@@ -2,12 +2,12 @@
 
   <PropertyGroup>
     <PackageId>seanstardev.RMVC</PackageId>
-    <Version>3.0.0</Version>
+    <Version>3.1.0</Version>
     <Authors>seanstardev</Authors>
     <Description>A small MVC framework for readable, navigable, compiler-checked application workflows, with typed commands, explicit actor boundaries and lifecycle coordination.</Description>
     <PackageProjectUrl>https://github.com/seanstardev/RMVC</PackageProjectUrl>
     <PackageReadmeFile>README.NuGet.md</PackageReadmeFile>
-    <PackageReleaseNotes>Major breaking release: stricter actor boundaries and required lookups, ordered root submission, explicit composition initialisation, required Shell and awaitable shutdown with model cleanup. Existing applications require migration; older repository samples await migration.</PackageReleaseNotes>
+    <PackageReleaseNotes>Adds awaitable progress hiding and command-scoped cancellation by root type. Compatibility: RFacade.AbortCommands&lt;TFacade&gt; is now internal. RFacade.AbortAllCommands remains public.</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/seanstardev/RMVC</RepositoryUrl>
     <RepositoryType>git</RepositoryType>

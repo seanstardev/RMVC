@@ -61,7 +61,7 @@ namespace RMVC
             }
         }
 
-        internal void AbortCommands(Type facadeType)
+        internal void AbortCommands(Type facadeType, Type? rootCommandType = null)
         {
             CancellationTokenSource[] operations;
 
@@ -71,7 +71,9 @@ namespace RMVC
 
                 foreach (var operation in activeOperations)
                 {
-                    if (operation.Value.Facade.GetType() == facadeType)
+                    var tracker = operation.Value;
+                    if (tracker.Facade.GetType() == facadeType
+                        && (rootCommandType == null || tracker.Command.GetType() == rootCommandType))
                         matching.Add(operation.Key);
                 }
 

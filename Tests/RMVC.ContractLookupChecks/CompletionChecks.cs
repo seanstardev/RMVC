@@ -108,6 +108,69 @@ namespace RMVC.ContractLookupChecks
             await CheckCase("no progress means no completion callback", c => { },
                 c => c.UpdateFactories == 0 && c.CompletionFactories == 0);
 
+            await CheckCase("repeated hide closes once and hidden root still reaches 100%", c =>
+            {
+                c.Root.Report = true;
+                c.Root.Body = async p =>
+                {
+                    await p.Hide();
+                    await p.Hide();
+                    return 41;
+                };
+            }, c => c.Root.ExitSuccess == true && c.UpdateFactories == 1
+                && c.CompletionFactories == 1 && c.Root.GetTrackedPercent() == 100);
+
+            await CheckCase("parent reports again immediately after child hides progress", c =>
+            {
+                c.Root.Report = true;
+                c.Root.Body = async p =>
+                {
+                    var child = c.New(Role.Child);
+                    child.Body = async nested =>
+                    {
+                        await nested.Hide();
+                        return 41;
+                    };
+                    await p.Child(child);
+                    int delivered = c.UpdateFactories;
+                    await p.ReportAgain();
+                    if (c.UpdateFactories != delivered + 1)
+                        throw new Exception("The next explicit report did not reach the callback.");
+
+                    return 41;
+                };
+            }, c => c.Root.ExitSuccess == true && c.CompletionFactories == 2);
+
+            await CheckCase("explicit hide can run after abort", c =>
+            {
+                c.Root.Report = true;
+                c.Root.Body = async p =>
+                {
+                    p.Cancel();
+                    await p.Hide();
+                    return 41;
+                };
+            }, c => c.Root.Aborted && c.UpdateFactories == 1 && c.CompletionFactories == 1
+                && c.Probes.Single(p => p.Role == Role.Complete).ExitSuccess == true);
+
+            await CheckCase("hide waits for an update already in flight", c =>
+            {
+                var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                c.WaitForUpdate = () => release.Task;
+                c.Root.Body = async p =>
+                {
+                    var update = p.ReportAgain();
+                    var hide = p.Hide();
+                    bool waited = !hide.IsCompleted && c.CompletionFactories == 0;
+                    release.TrySetResult();
+                    await Task.WhenAll(update, hide);
+                    if (!waited)
+                        throw new Exception("Hide passed an in-flight progress update.");
+
+                    return 41;
+                };
+            }, c => c.Root.ExitSuccess == true && c.UpdateFactories == 1 && c.CompletionFactories == 1);
+
             var reused = new Case(); current = reused; Host.Instance.Submit(reused.Root);
             await reused.Root.Exited.Task.WaitAsync(TimeSpan.FromSeconds(5)); await shell.WaitForIdle();
             bool rejected = false;
@@ -187,6 +250,7 @@ namespace RMVC.ContractLookupChecks
             internal bool CallbackChildren;
             internal bool ThrowUpdateFactory;
             internal bool ThrowCompleteFactory;
+            internal Func<Task>? WaitForUpdate;
             internal Case() => Root = New(Role.Root);
             internal Probe New(Role role)
             {
@@ -200,6 +264,9 @@ namespace RMVC.ContractLookupChecks
                 p.Body = async parent =>
                 {
                     if (ThrowCallbackRun == role) throw new Exception("callback Run");
+                    if (role == Role.Update && WaitForUpdate != null)
+                        await WaitForUpdate();
+
                     return CallbackChildren ? await parent.Child(New(Role.CallbackChild)) : 41;
                 };
                 return p;
@@ -227,6 +294,17 @@ namespace RMVC.ContractLookupChecks
             internal void Error() => SetError("recorded error");
             internal void Cancel() => AbortAllCommands();
             internal void CheckAbort() => ThrowIfAbortRequested();
+            internal Task Hide() => HideProgress();
+            internal Task ReportAgain() => SetProgress(25, "working again");
+
+            internal int GetTrackedPercent()
+            {
+                const System.Reflection.BindingFlags flags =
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+                var tracker = typeof(RCommandBase).GetProperty("Tracker", flags)!.GetValue(this)!;
+                var progress = (RProgress[])tracker.GetType().GetMethod("GetProgressReport", flags)!.Invoke(tracker, null)!;
+                return progress[0].Percent;
+            }
             protected override string GetProgressTitle()
             {
                 if (CancelBeforeRun) AbortAllCommands();

@@ -67,7 +67,9 @@ internal static class InitialisationChecks
                     childRelease.TrySetResult();
                 }
                 else
-                    RFacade.AbortCommands<Root>();
+                    typeof(RFacade).GetMethod("AbortCommands",
+                        System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!
+                        .MakeGenericMethod(typeof(Root)).Invoke(null, null);
             }
         }
 
@@ -259,7 +261,7 @@ internal static class InitialisationChecks
         protected override void OnCommandExit(bool success)
         {
             Record(name + "-exit");
-            if (name == "first" && scenario == "cancel-between") RFacade.AbortCommands<Root>();
+            if (name == "first" && scenario == "cancel-between") AbortCommands<Root>();
         }
     }
     private sealed class Helper : RCommand<RVoid>

@@ -50,6 +50,16 @@ namespace RMVC
             RFacade.AbortCommands<TFacade>();
         }
 
+        /// <summary>Requests cancellation of admitted roots of this exact type in the command's facade.</summary>
+        protected void AbortRootCommands<TRootCommand>()
+            where TRootCommand : RCommandBase
+        {
+            RequireActorAccess();
+
+            var facade = Facade ?? throw new InvalidOperationException("The command is not running.");
+            RFacade.AbortRootCommands(facade.GetType(), typeof(TRootCommand));
+        }
+
         protected void AbortAllCommands()
         {
             RequireActorAccess();
@@ -377,6 +387,18 @@ namespace RMVC
             }
 
             StorePendingProgress(null, message);
+        }
+
+        /// <summary>
+        /// Hides this chain's progress through the owning facade and waits for its callback.
+        /// A subsequent explicit progress report can show it again.
+        /// </summary>
+        protected Task HideProgress()
+        {
+            if (IgnoreProgressCallbackUpdate())
+                return Task.CompletedTask;
+
+            return Tracker?.HideProgress() ?? Task.CompletedTask;
         }
 
         protected void SetError(string? errorMessage = null)

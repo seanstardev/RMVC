@@ -1,4 +1,5 @@
 """Build and exercise the README's exact C# snippets. Requires Python 3 and .NET 9 SDK."""
+import argparse
 from pathlib import Path
 import queue
 import re
@@ -20,7 +21,7 @@ def snippet(name):
     return match.group(1) + "\n"
 
 
-def exercise(folder, composed):
+def exercise(folder, composed, package):
     folder.mkdir()
     core = snippet("CounterApp.cs") + "\n" + snippet("IncrementTwiceCmd.cs")
     if composed:
@@ -30,14 +31,27 @@ def exercise(folder, composed):
         core = core.replace(old, "private void OnIncrement() => Execute(new IncrementTwiceCmd());")
     (folder / "CounterApp.cs").write_text(core, encoding="utf-8")
     (folder / "Program.cs").write_text(snippet("Program.cs"), encoding="utf-8")
-    reference = escape(str(ROOT / "RMVC" / "RMVC.csproj"), {'"': '&quot;'})
+    if package:
+        package_folder = escape(str(package.parent))
+        package_cache = escape(str(folder / "packages"))
+        package_version = package.name.removeprefix("seanstardev.RMVC.").removesuffix(".nupkg")
+        restore = (
+            f"<RestoreSources>{package_folder}</RestoreSources>"
+            f"<RestorePackagesPath>{package_cache}</RestorePackagesPath>"
+        )
+        dependency = f'<PackageReference Include="seanstardev.RMVC" Version="[{package_version}]" />'
+    else:
+        restore = ""
+        reference = escape(str(ROOT / "RMVC" / "RMVC.csproj"), {'"': '&quot;'})
+        dependency = f'<ProjectReference Include="{reference}" />'
+
     (folder / "CounterDemo.csproj").write_text(
         '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
         '<OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework>'
         '<ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>'
         '<TreatWarningsAsErrors>true</TreatWarningsAsErrors>'
-        '</PropertyGroup><ItemGroup><ProjectReference Include="' + reference + '" />'
-        '</ItemGroup></Project>', encoding="utf-8")
+        f'{restore}</PropertyGroup><ItemGroup>{dependency}</ItemGroup></Project>',
+        encoding="utf-8")
     artifacts = folder / "artifacts"
     built = subprocess.run(
         ["dotnet", "build", str(folder / "CounterDemo.csproj"),
@@ -99,11 +113,19 @@ def exercise(folder, composed):
         process.stdout.close()
 
 
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--package", type=Path, help="Verify a local seanstardev.RMVC nupkg instead of the project.")
+package = parser.parse_args().package
+if package is not None:
+    package = package.resolve()
+    if not package.is_file() or not re.fullmatch(r"seanstardev\.RMVC\.\d+\.\d+\.\d+\.nupkg", package.name):
+        parser.error("Expected an existing seanstardev.RMVC.<version>.nupkg file.")
+
 with tempfile.TemporaryDirectory(prefix="rmvc-readme-") as temporary:
     work = Path(temporary).resolve()
     # TemporaryDirectory recursively cleans only this verified, freshly created tree.
     if work.parent != Path(tempfile.gettempdir()).resolve() or not work.name.startswith("rmvc-readme-"):
         raise RuntimeError("Unexpected temporary test directory")
-    exercise(work / "single-command", composed=False)
-    exercise(work / "composed-command", composed=True)
+    exercise(work / "single-command", composed=False, package=package)
+    exercise(work / "composed-command", composed=True, package=package)
 print("README verified: both runnable journeys pass.")

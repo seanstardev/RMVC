@@ -12,11 +12,13 @@ The following builds must fail with C# compiler errors, not restore/infrastructu
 dotnet build RMVC.AccessChecks.csproj -p:Probe=InheritedAccess
 dotnet build RMVC.AccessChecks.csproj -p:Probe=AlreadyInternal
 dotnet build RMVC.AccessChecks.csproj -p:Probe=InstanceAbort
+dotnet build RMVC.AccessChecks.csproj -p:Probe=ScopedAbort
 ```
 
 InheritedAccess contains 15 now-forbidden calls through facade/model/mediator/bridge
 inheritance. AlreadyInternal contains three direct internal-resolver calls. InstanceAbort
-verifies that public AbortAllCommands must be called statically. EssentialUsage verifies
+verifies that public AbortAllCommands must be called statically. ScopedAbort verifies
+that application assemblies cannot call the scoped facade methods. EssentialUsage verifies
 registration/progress factories, root Execute, command lookup/navigation and public host
 operations. These are compile checks, not runnable examples or framework features.
 Negative sources are excluded from default compilation. Use a separate artifacts path

@@ -61,6 +61,11 @@ namespace RMVC.ContractLookupChecks
                     await RegistrationOnceChecks.Run(args[1]);
                     return 0;
                 }
+                if (args.FirstOrDefault() == "abort-root")
+                {
+                    await AbortRootChecks.Run();
+                    return 0;
+                }
                 if (args.FirstOrDefault() == "root-submission")
                 {
                     await RootSubmissionChecks.Run(args[1]);

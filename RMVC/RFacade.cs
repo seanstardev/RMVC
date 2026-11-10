@@ -473,8 +473,17 @@ namespace RMVC
             Console.WriteLine($"{logMessage}");
         }
 
-        public static void AbortCommands<TFacade>() where TFacade : RFacade
+        internal static void AbortCommands<TFacade>() where TFacade : RFacade
             => operations.AbortCommands(typeof(TFacade));
+
+        /// <summary>Requests cancellation of admitted roots with the exact facade and command types.</summary>
+        internal static void AbortRootCommands<TFacade, TRootCommand>()
+            where TFacade : RFacade
+            where TRootCommand : RCommandBase
+            => AbortRootCommands(typeof(TFacade), typeof(TRootCommand));
+
+        internal static void AbortRootCommands(Type facadeType, Type rootCommandType)
+            => operations.AbortCommands(facadeType, rootCommandType);
 
         /// <summary>Requests cooperative cancellation application-wide; does not close admission or perform cleanup.</summary>
         public static void AbortAllCommands()
@@ -992,16 +1001,12 @@ namespace RMVC
         // Composition is flat: the parent owns progress; standalone facades own theirs.
         private RFacade ProgressOwner => facadeParent ?? this;
 
-        private async Task HandleRootComplete(RCommandBase command)
+        private Task HandleRootComplete(RCommandBase command)
         {
-            if (!command.HasCommandParent &&
-                command.ReportsProgress &&
-                command.Tracker?.IsShutdownCoordinator != true &&
-                command.Tracker?.ProgressRequested == true)
-            {
-                await command.Tracker.Facade.HandleProgressComplete(
-                    command.Tracker.CommandRootId).ConfigureAwait(false);
-            }
+            if (!command.HasCommandParent && command.ReportsProgress && command.Tracker is { } tracker)
+                return tracker.HideProgress();
+
+            return Task.CompletedTask;
         }
 
         protected RFacade()
@@ -1018,7 +1023,7 @@ namespace RMVC
             actors = new RActorRegistry(this);
         }
 
-        private async Task HandleProgressComplete(string commandRootId)
+        internal async Task HandleProgressComplete(string commandRootId)
         {
             var owner = ProgressOwner;
             RCommandBase? command = owner.CreateProgressCompleteCommand(commandRootId);
@@ -1061,7 +1066,7 @@ namespace RMVC
             string commandRootId, RProgress[] progress)
             => null;
         
-        /// <summary>Creates a fresh command for each root's reporting completion; called repeatedly, or return null.</summary>
+        /// <summary>Creates a fresh command when a reporting root hides progress or finishes, or return null.</summary>
         protected virtual RCommandBase? CreateProgressCompleteCommand(
             string commandRootId)
             => null;

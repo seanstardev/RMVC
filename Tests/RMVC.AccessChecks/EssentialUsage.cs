@@ -27,7 +27,6 @@ public sealed class Gateway : FacadeBase
         RFacade.Child<Child>();
         RFacade.RegisterActor<Child, IView>(null!);
         RFacade.UnregisterActor<Child, IView>(null!);
-        RFacade.AbortCommands<Child>();
         _ = RFacade.Shutdown(1500);
         RFacade.AbortAllCommands();
     }
@@ -46,6 +45,8 @@ public sealed class Work : RCommand<RVoid>
         _ = FacadeChild<Child>();
         _ = FacadeParentByContract<IParent>();
         _ = BridgeChild<Bridge>();
+        AbortCommands<Child>();
+        AbortRootCommands<WorkRoot>();
         return Complete();
     }
 }

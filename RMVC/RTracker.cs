@@ -32,15 +32,42 @@ namespace RMVC
         internal bool IsShutdownCoordinator => Volatile.Read(ref GetTrackerRoot().shutdownCoordinator) != 0;
         internal void RestrictToShutdown() => Interlocked.Exchange(ref GetTrackerRoot().shutdownCoordinator, 1);
         internal bool SameRoot(RTracker other) => ReferenceEquals(GetTrackerRoot(), other.GetTrackerRoot());
-        internal bool ProgressRequested => GetTrackerRoot().progressRequested;
         private const int ProgressUpdateIntervalMilliseconds = 100;
         private readonly Stopwatch progressUpdateTimer = new Stopwatch();
         private readonly double weightInParent;
         private readonly bool reportsProgress;
-        private bool progressRequested;
+        private volatile bool progressRequested;
+        private SemaphoreSlim? progressDelivery;
 
         internal void RequestProgress()
             => GetTrackerRoot().progressRequested = true;
+
+        internal async Task HideProgress()
+        {
+            var root = GetTrackerRoot();
+            if (!root.progressRequested || root.IsShutdownCoordinator)
+                return;
+
+            var delivery = root.GetProgressDelivery();
+            await delivery.WaitAsync().ConfigureAwait(false);
+
+            try
+            {
+                if (!root.progressRequested || root.IsShutdownCoordinator)
+                    return;
+
+                root.progressRequested = false;
+                root.progressUpdateTimer.Reset();
+                await root.Facade.HandleProgressComplete(root.CommandId).ConfigureAwait(false);
+            }
+            finally
+            {
+                delivery.Release();
+            }
+        }
+
+        private SemaphoreSlim GetProgressDelivery()
+            => LazyInitializer.EnsureInitialized(ref progressDelivery, () => new SemaphoreSlim(1, 1))!;
 
         private RTracker? trackerChild;
 
@@ -194,18 +221,29 @@ namespace RMVC
                 return;
             }
 
-            // Only the root reaches here, so throttling is per chain.
-            if (!forceReport &&
-                progressUpdateTimer.IsRunning &&
-                progressUpdateTimer.ElapsedMilliseconds < ProgressUpdateIntervalMilliseconds)
-                return;
+            var delivery = GetProgressDelivery();
+            await delivery.WaitAsync().ConfigureAwait(false);
 
-            progressUpdateTimer.Restart();
+            try
+            {
+                if (!progressRequested || IsShutdownCoordinator)
+                    return;
 
-            var progressSet = GetProgressReport();
+                // Only the root reaches here, so throttling is per chain.
+                if (!forceReport && progressUpdateTimer.IsRunning
+                    && progressUpdateTimer.ElapsedMilliseconds < ProgressUpdateIntervalMilliseconds)
+                    return;
 
-            if (progressSet.Length > 0)
-                await Facade.HandleProgressChange(CommandId, progressSet).ConfigureAwait(false);
+                progressUpdateTimer.Restart();
+
+                var progressSet = GetProgressReport();
+                if (progressSet.Length > 0)
+                    await Facade.HandleProgressChange(CommandId, progressSet).ConfigureAwait(false);
+            }
+            finally
+            {
+                delivery.Release();
+            }
         }
 
         private async Task UpdatePercent(double localPercentIncrement, bool forceReport = false)
