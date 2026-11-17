@@ -362,9 +362,6 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 
-# Local rolling RMVC review documentation
-/Doc/
-
 # Versioned release notes; other Release build outputs remain ignored.
 !/Release/
 /Release/*

@@ -44,6 +44,88 @@ namespace RMVC.ContractLookupChecks
                 child.Body = _ => throw new InvalidOperationException("child failure");
                 return await p.Child(child);
             }, c => c.Probes.All(p => p.ExitSuccess == false) && c.Root.ErrorMessages.Any());
+            await CheckCase("typed child Run error is recorded instead of reaching parent catch", c =>
+            {
+                c.Root.Body = async parent =>
+                {
+                    var child = c.New(Role.Child);
+                    child.Body = _ => throw new InvalidOperationException(
+                        "typed child failure");
+
+                    int result;
+
+                    try
+                    {
+                        result = await parent.Child(child);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        c.ChildCatchRan = true;
+                        throw;
+                    }
+
+                    c.ParentContinued = true;
+                    c.ChildResult = result;
+
+                    return 41;
+                };
+            }, c => c.ChildCatchRan == false && c.ParentContinued
+                && c.ChildResult == 0 && c.Root.ExitSuccess == false
+                && c.Root.ErrorMessages.Contains("typed child failure"));
+
+            await CheckCase("untyped child Run error is recorded instead of reaching parent catch", c =>
+            {
+                c.Root.Body = async parent =>
+                {
+                    var child = c.New(Role.Child);
+                    child.Body = async _ =>
+                    {
+                        await Task.Yield();
+
+                        throw new InvalidOperationException(
+                            "untyped child failure");
+                    };
+
+                    try
+                    {
+                        await parent.ChildUntyped(child);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        c.ChildCatchRan = true;
+                        throw;
+                    }
+
+                    c.ParentContinued = true;
+
+                    return 41;
+                };
+            }, c => c.ChildCatchRan == false && c.ParentContinued
+                && c.Root.ExitSuccess == false
+                && c.Root.ErrorMessages.Contains("untyped child failure"));
+
+            await CheckCase("ErrorOrAbort prevents dependent work after recorded child error", c =>
+            {
+                c.Root.Body = async parent =>
+                {
+                    var child = c.New(Role.Child);
+                    child.Body = _ => throw new InvalidOperationException(
+                        "guarded child failure");
+
+                    await parent.Child(child);
+                    c.ParentContinued = true;
+
+                    if (parent.HasErrorOrAbort)
+                        return 0;
+
+                    c.DependentWorkRan = true;
+
+                    return 41;
+                };
+            }, c => c.ParentContinued && c.DependentWorkRan == false
+                && c.Root.ExitSuccess == false
+                && c.Root.ErrorMessages.Contains("guarded child failure"));
+
             await CheckCase("unrequested cancellation exception is an error", c => c.Root.Body = _ => throw new OperationCanceledException("not requested"),
                 c => c.Root.ExitSuccess == false && c.Root.ErrorMessages.Any());
             await CheckCase("cancellation during Run", c => c.Root.Body = p =>
@@ -54,11 +136,47 @@ namespace RMVC.ContractLookupChecks
             }, c => c.Root.ExitSuccess == false && c.Root.Aborted && !c.Root.ErrorMessages.Any());
             await CheckCase("cancellation before Run", c => c.Root.CancelBeforeRun = true,
                 c => c.Root.RunCount == 0 && c.Root.ExitSuccess == false && c.Root.Aborted);
-            await CheckCase("cancellation before nested Run", c => c.Root.Body = async p =>
+            await CheckCase("child starts after cancellation with abort still set", c => c.Root.Body = async p =>
             {
                 p.Cancel();
-                return await p.Child(c.New(Role.Child));
-            }, c => c.Probes.Single(p => p.Role == Role.Child).RunCount == 0 && c.Probes.All(p => p.ExitSuccess == false));
+                var child = c.New(Role.Child);
+                child.Body = x =>
+                {
+                    if (x.Aborted == false || x.HasErrorOrAbort == false)
+                        throw new Exception("Cleanup child lost inherited abort state.");
+
+                    return Task.FromResult(41);
+                };
+
+                return await p.Child(child);
+            }, c => c.Probes.Single(p => p.Role == Role.Child).RunCount == 1
+                && c.Probes.All(p => p.ExitSuccess == false)
+                && c.Root.ErrorMessages.Length == 0);
+
+            await CheckCase("untyped cleanup child starts after abort", c => c.Root.Body = async p =>
+            {
+                p.Cancel();
+
+                await p.ChildUntyped(c.New(Role.Child));
+
+                return 41;
+            }, c => c.Probes.Single(p => p.Role == Role.Child).RunCount == 1
+                && c.Probes.All(p => p.Aborted && p.ExitSuccess == false));
+
+            await CheckCase("aborted child still stops at its own checkpoint", c => c.Root.Body = async p =>
+            {
+                p.Cancel();
+                var child = c.New(Role.Child);
+                child.Body = x =>
+                {
+                    x.CheckAbort();
+
+                    throw new Exception("Work ran beyond an inherited abort checkpoint.");
+                };
+
+                return await p.Child(child);
+            }, c => c.Probes.Single(p => p.Role == Role.Child).RunCount == 1
+                && c.Root.ErrorMessages.Length == 0);
             await CheckCase("cancellation in nested Run", c => c.Root.Body = async p =>
             {
                 var child = c.New(Role.Child);
@@ -242,6 +360,10 @@ namespace RMVC.ContractLookupChecks
         {
             internal readonly List<Probe> Probes = new();
             internal readonly Probe Root;
+            internal bool ChildCatchRan;
+            internal bool ParentContinued;
+            internal bool DependentWorkRan;
+            internal int? ChildResult;
             internal int UpdateFactories;
             internal int CompletionFactories;
             internal Role? ThrowCallbackRun;
@@ -291,6 +413,12 @@ namespace RMVC.ContractLookupChecks
             internal Probe(Case c, Role role) => Role = role;
             protected override bool AllowConcurrentRoots => AllowOverlap;
             internal Task<int> Child(Probe child) => Execute(child);
+            internal Task ChildUntyped(RCommandBase child)
+                => base.Execute(child);
+
+            internal bool HasErrorOrAbort
+                => base.ErrorOrAbort;
+
             internal void Error() => SetError("recorded error");
             internal void Cancel() => AbortAllCommands();
             internal void CheckAbort() => ThrowIfAbortRequested();

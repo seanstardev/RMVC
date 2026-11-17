@@ -41,6 +41,12 @@ namespace RMVC.ContractLookupChecks
         {
             try
             {
+                if (args.FirstOrDefault() == "command-lock")
+                {
+                    await CommandLockChecks.Run(args[1]);
+                    return 0;
+                }
+
                 if (args.FirstOrDefault() == "awaitable-shutdown")
                 {
                     await AwaitableShutdownChecks.Run(args[1]);

@@ -78,6 +78,10 @@ namespace RMVC
 
         private readonly RActorRegistry actors;
 
+        private readonly RCommandLockRegistry commandLocks;
+
+        private readonly RCommandLockCoordinator commandLockCoordinator = new RCommandLockCoordinator();
+
         private int bridgesRegistrationStarted;
 
         private readonly Dictionary<Type, RBridge> bridgesChildDictionary =
@@ -168,6 +172,8 @@ namespace RMVC
                     stage = "Facade constructor";
                     var facade = registration.Factory();
                     facades.Add(facade);
+                    stage = "RegisterCommandLocks";
+                    facade.commandLocks.Register(facade.RegisterCommandLocks());
                     stage = "RegisterModels";
                     facade.actors.RegisterModels(facade.RegisterModels);
                     stage = "RegisterMediators";
@@ -974,10 +980,22 @@ namespace RMVC
                     }
                     finally
                     {
-                        if (EnableDebugMode)
-                            Log($"ROOT END: command={command.GetType().FullName}; commandId={tracker.CommandId}; commandRootId={tracker.CommandRootId}; facade={GetType().FullName}; errorOrAbort={tracker.ErrorOrAbort}; error={tracker.GetLatestError()?.Message ?? string.Empty}; cancelled={tracker.Token.IsCancellationRequested}; thread={Environment.CurrentManagedThreadId}.");
-
-                        operations.Unregister(source);
+                        try
+                        {
+                            if (EnableDebugMode)
+                                Log($"ROOT END: command={command.GetType().FullName}; commandId={tracker.CommandId}; commandRootId={tracker.CommandRootId}; facade={GetType().FullName}; errorOrAbort={tracker.ErrorOrAbort}; error={tracker.GetLatestError()?.Message ?? string.Empty}; cancelled={tracker.Token.IsCancellationRequested}; thread={Environment.CurrentManagedThreadId}.");
+                        }
+                        finally
+                        {
+                            try
+                            {
+                                operations.Unregister(source);
+                            }
+                            finally
+                            {
+                                RCommandLockFailure.DeliverUnhandled(tracker);
+                            }
+                        }
                     }
                 }
 
@@ -991,6 +1009,26 @@ namespace RMVC
         protected abstract RMediator[] RegisterMediators();
         /// <summary>Supplies models during the one registration attempt. Keep construction lightweight; do not call as a lookup.</summary>
         protected abstract IRModel[] RegisterModels();
+
+        /// <summary>Optionally supplies facade-owned command gates. Called once before initialisation.</summary>
+        protected virtual IRCommandLock[] RegisterCommandLocks()
+            => Array.Empty<IRCommandLock>();
+
+        internal bool HasCommandLocks
+            => commandLocks.HasRegistrations;
+
+        internal TLock ResolveCommandLock<TLock>() where TLock : class, IRCommandLock
+            => commandLocks.Resolve<TLock>();
+
+        internal Task<RCommandLockCoordinator.Lease> AcquireCommandLocks(
+            RTracker tracker,
+            IRCommandLock[] declarations,
+            bool progressCallback)
+        {
+            var validated = commandLocks.Validate(tracker, declarations, progressCallback);
+
+            return commandLockCoordinator.Acquire(tracker, validated);
+        }
 
 
 
@@ -1021,6 +1059,7 @@ namespace RMVC
                     "Do not instantiate a Facade directly. Use RFacade.Create<TFacade>().");
 
             actors = new RActorRegistry(this);
+            commandLocks = new RCommandLockRegistry(this);
         }
 
         internal async Task HandleProgressComplete(string commandRootId)

@@ -15,6 +15,27 @@ namespace RMVC
         internal RTracker? Tracker { get; private set; }
         private int executionReserved;
 
+        private RCommandChildExecution? children;
+
+        private RCommandChildExecution Children
+            => LazyInitializer.EnsureInitialized(ref children, () => new RCommandChildExecution())!;
+
+        /// <summary>Declares registered gates required throughout this command's execution.</summary>
+        protected virtual IRCommandLock[] GetLocks()
+            => Array.Empty<IRCommandLock>();
+
+        /// <summary>Retrieves a gate; does not acquire it. Available after command binding, not in constructors.</summary>
+        protected TLock Lock<TLock>() where TLock : class, IRCommandLock
+        {
+            RequireActorAccess();
+
+            var facade = Facade
+                ?? throw new InvalidOperationException(
+                    "Command-lock lookup requires a command bound to its facade.");
+
+            return facade.ResolveCommandLock<TLock>();
+        }
+
         // Permanently reserve this instance before queueing or running it.
         // Reservation prevents reuse; it does not mean Run() has started.
         internal void ReserveForExecution()
@@ -223,24 +244,66 @@ namespace RMVC
             this.Tracker = tracker;
             this.Facade = tracker.Facade;
 
+            RCommandLockCoordinator.Lease? reservations = null;
+
+            bool isRoot = tracker.TrackerParent == null;
+
             try
             {
                 tracker.Facade.ValidateInitialisationExecution(this);
+
+                // Children can perform cleanup with abort already set; roots still stop before entry.
+                if (isRoot && tracker.Token.IsCancellationRequested)
+                    return;
+
+                try
+                {
+                    var declarations = GetLocks()
+                        ?? throw new InvalidOperationException(
+                            "GetLocks returned null for " + GetType().FullName + ".");
+
+                    if (declarations.Length != 0)
+                    {
+                        reservations = await tracker.Facade.AcquireCommandLocks(
+                            tracker,
+                            declarations,
+                            IsProgressCallback).ConfigureAwait(false);
+                    }
+                }
+                catch (OperationCanceledException) when (tracker.Token.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception error)
+                {
+                    RCommandLockCoordinator.Report(
+                        "COMMAND LOCK REJECTED: facade=" + tracker.Facade.GetType().FullName
+                            + "; command=" + GetType().FullName + "; commandId=" + tracker.CommandId
+                            + "; root=" + tracker.CommandRootId + "; " + error.Message);
+
+                    throw;
+                }
+
+                if (isRoot)
+                    tracker.Token.ThrowIfCancellationRequested();
+
                 if (!IsProgressCallback)
                     await tracker.SetProgressTitle(pendingTitle ?? GetProgressTitle()).ConfigureAwait(false);
 
                 await ApplyPendingProgress().ConfigureAwait(false);
 
-                if (tracker.Token.IsCancellationRequested)
+                if (isRoot && tracker.Token.IsCancellationRequested)
                     return;
 
                 if (RFacade.EnableDebugMode && HasCommandParent && !IsProgressCallback)
                     RFacade.Log($"CHILD START: command={GetType().FullName}; commandId={tracker.CommandId}; commandRootId={tracker.CommandRootId}; commandParentId={tracker.TrackerParent?.CommandId}; thread={Environment.CurrentManagedThreadId}.");
 
                 tracker.Facade.BeginInitialisationBody(this);
+
                 try
                 {
                     await run().ConfigureAwait(false);
+                    RCommandLockFailure.ThrowIfRecorded(tracker);
                 }
                 finally
                 {
@@ -253,6 +316,11 @@ namespace RMVC
                 if (RFacade.EnableDebugMode)
                     RFacade.Log($"COMMAND ABORTED: command={GetType().FullName}; commandId={tracker.CommandId}; commandRootId={tracker.CommandRootId}.");
             }
+            catch (RCommandLockCycleException)
+            {
+                // The root still delivers this fault if an application ancestor catches it.
+                throw;
+            }
             catch (Exception ex)
             {
                 if (RFacade.EnableDebugMode)
@@ -262,28 +330,65 @@ namespace RMVC
             }
             finally
             {
-                await HandleCommandComplete().ConfigureAwait(false);
+                try
+                {
+                    if (tracker.Facade.HasCommandLocks)
+                        await Children.DrainBeforeExit(tracker).ConfigureAwait(false);
+
+                    await HandleCommandComplete().ConfigureAwait(false);
+                }
+                finally
+                {
+                    reservations?.Dispose();
+                }
+
                 if (RFacade.EnableDebugMode && HasCommandParent && !IsProgressCallback)
-                    RFacade.Log($"CHILD END: command={GetType().FullName}; commandId={tracker.CommandId}; commandRootId={tracker.CommandRootId}; errorOrAbort={tracker.ErrorOrAbort}; error={tracker.GetLatestError()?.Message ?? string.Empty}; thread={Environment.CurrentManagedThreadId}.");
+                    RFacade.Log($"CHILD END: command={GetType().FullName}; commandId={tracker.CommandId}; commandRootId={tracker.CommandRootId}; errorOrAbort={tracker.ErrorOrAbort}; error={tracker.GetLatestError()?.Message ?? string.Empty}; cancelled={tracker.Token.IsCancellationRequested}; thread={Environment.CurrentManagedThreadId}.");
             }
         }
 
-        // Await children sequentially; they share this chain's errors and cancellation.
-        // Keep these entry points synchronous so misuse also throws before a Task is returned.
+        // Keep validation synchronous. Await children sequentially; they share errors and cancellation.
         protected Task Execute(
             RCommandBase command,
             double percentCap = 100)
         {
             var tracker = RequireChildExecutionTracker();
-            if (command == null) throw new ArgumentNullException(nameof(command));
-            tracker.Facade.ValidateOrdinaryCommand(command);
-            command.ReserveForExecution();
-            command.HasCommandParent = true;
-            command.IsProgressCallback = IsProgressCallback;
 
-            return tracker.Facade.Execute(
-                command,
-                tracker.CreateTrackerChild(command, percentCap));
+            if (command == null)
+                throw new ArgumentNullException(nameof(command));
+
+            tracker.Facade.ValidateOrdinaryCommand(command);
+
+            if (tracker.Facade.HasCommandLocks == false)
+            {
+                command.ReserveForExecution();
+                command.HasCommandParent = true;
+                command.IsProgressCallback = IsProgressCallback;
+
+                return tracker.Facade.Execute(
+                    command,
+                    tracker.CreateTrackerChild(command, percentCap));
+            }
+
+            var completion = Children.Begin(this);
+
+            try
+            {
+                command.ReserveForExecution();
+                command.HasCommandParent = true;
+                command.IsProgressCallback = IsProgressCallback;
+
+                return ExecuteChild(
+                    command,
+                    tracker.CreateTrackerChild(command, percentCap),
+                    completion);
+            }
+            catch
+            {
+                Children.Finish(completion);
+
+                throw;
+            }
         }
 
         protected Task<TResult> Execute<TResult>(
@@ -291,23 +396,86 @@ namespace RMVC
             double percentCap = 100)
         {
             var tracker = RequireChildExecutionTracker();
-            if (command == null) throw new ArgumentNullException(nameof(command));
-            tracker.Facade.ValidateOrdinaryCommand(command);
-            command.ReserveForExecution();
-            command.HasCommandParent = true;
-            command.IsProgressCallback = IsProgressCallback;
 
-            return tracker.Facade.Execute(
-                command,
-                tracker.CreateTrackerChild(command, percentCap));
+            if (command == null)
+                throw new ArgumentNullException(nameof(command));
+
+            tracker.Facade.ValidateOrdinaryCommand(command);
+
+            if (tracker.Facade.HasCommandLocks == false)
+            {
+                command.ReserveForExecution();
+                command.HasCommandParent = true;
+                command.IsProgressCallback = IsProgressCallback;
+
+                return tracker.Facade.Execute(
+                    command,
+                    tracker.CreateTrackerChild(command, percentCap));
+            }
+
+            var completion = Children.Begin(this);
+
+            try
+            {
+                command.ReserveForExecution();
+                command.HasCommandParent = true;
+                command.IsProgressCallback = IsProgressCallback;
+
+                return ExecuteChild(
+                    command,
+                    tracker.CreateTrackerChild(command, percentCap),
+                    completion);
+            }
+            catch
+            {
+                Children.Finish(completion);
+
+                throw;
+            }
+        }
+
+        private async Task ExecuteChild(
+            RCommandBase command,
+            RTracker tracker,
+            TaskCompletionSource<bool> completion)
+        {
+            try
+            {
+                await tracker.Facade.Execute(command, tracker).ConfigureAwait(false);
+            }
+            finally
+            {
+                Children.Finish(completion);
+            }
+        }
+
+        private async Task<TResult> ExecuteChild<TResult>(
+            RCommand<TResult> command,
+            RTracker tracker,
+            TaskCompletionSource<bool> completion)
+        {
+            try
+            {
+                return await tracker.Facade.Execute(command, tracker).ConfigureAwait(false);
+            }
+            finally
+            {
+                Children.Finish(completion);
+            }
         }
 
         private RTracker RequireChildExecutionTracker()
         {
             RequireActorAccess();
-            return Tracker ?? throw new InvalidOperationException(
-                $"Command '{GetType().FullName}' cannot execute a child command before " +
-                "it is bound for execution. Do not call Execute() from a command constructor.");
+
+            var tracker = Tracker
+                ?? throw new InvalidOperationException(
+                    $"Command '{GetType().FullName}' cannot execute a child command before "
+                        + "it is bound for execution. Do not call Execute() from a command constructor.");
+
+            RCommandLockFailure.ThrowIfRecorded(tracker);
+
+            return tracker;
         }
 
         // True when no error has been recorded and no cancellation requested.
