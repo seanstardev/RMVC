@@ -14,6 +14,18 @@ changes or the branch has diverged, show the maintainer what you found and agree
 which commit to release. A clean working tree cannot confirm that editor buffers
 have been saved or that changes from another checkout have been included.
 
+## Present the plan and README
+
+Before writing release files, outline the exact steps for this release in
+order. Name the version, source branch, files to change, checks to run,
+artifacts to build, tag, publishing destinations and verification steps.
+Identify where the maintainer may need to sign in or submit an upload.
+
+Show the proposed release README text in chat before creating or editing it.
+Include the full proposed package README and any proposed changes to the
+repository README. Let the maintainer review the text and plan before
+proceeding.
+
 ## Prepare
 
 1. Confirm the version and the exact framework changes going into it. Review
@@ -65,3 +77,9 @@ GitHub asset. Record SHA-256 hashes for both files.
 
 Reuse the existing artifact if validation is still processing. If a published
 version needs a correction, prepare a new version.
+
+## Close out
+
+Report the verified GitHub release and NuGet package links. Then ask the
+maintainer whether to update consuming projects to the newly published NuGet
+version. Wait for their decision before changing project references.

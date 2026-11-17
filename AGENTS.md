@@ -24,4 +24,17 @@ See [the review method](Doc/Review-method.md#approve-the-exact-framework-diff).
 
 Start every release by asking the maintainer to confirm the RMVC checkout is up
 to date and all intended changes are saved and committed. Wait for confirmation
-before preparing or publishing the release. Follow [the release procedure](RELEASING.md#confirm-the-checkout-first).
+before preparing or publishing the release. Present the exact release steps and
+proposed README text before editing release files. After verification, ask
+whether to update consuming projects to the new NuGet version.
+Follow [the release procedure](RELEASING.md#confirm-the-checkout-first).
+
+
+# Paused command-lock proposal
+
+Before resuming lock work, read the
+[Atlas cold-start handoff](../RadioRelay/Source/RadioAtlas/.Documentation/Command-lock-cold-start-handoff.md)
+and its full implementation draft. The draft contains all new files and paired
+Before/After blocks anchored to source hashes. It has NOT been applied or approved.
+Present it in chat before framework edits; do not resurrect the rejected ancestor-
+subset rule or assume temporary draft probes establish lifecycle correctness.
