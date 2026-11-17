@@ -5,6 +5,7 @@ C# framework. See the [main README](../README.md) for the current API and quicks
 
 | Version | Changes |
 | --- | --- |
+| [3.2.0](3.2.0.md) | Optional command locks and awaited child cleanup after cancellation |
 | [3.1.0](3.1.0.md) | Awaitable progress hiding and command-scoped root cancellation |
 | [3.0.0](3.0.0.md) | Actor boundaries, command submission, initialisation and shutdown |
 

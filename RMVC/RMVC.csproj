@@ -2,12 +2,12 @@
 
   <PropertyGroup>
     <PackageId>seanstardev.RMVC</PackageId>
-    <Version>3.1.0</Version>
+    <Version>3.2.0</Version>
     <Authors>seanstardev</Authors>
     <Description>A small MVC framework for readable, navigable, compiler-checked application workflows, with typed commands, explicit actor boundaries and lifecycle coordination.</Description>
     <PackageProjectUrl>https://github.com/seanstardev/RMVC</PackageProjectUrl>
     <PackageReadmeFile>README.NuGet.md</PackageReadmeFile>
-    <PackageReleaseNotes>Adds awaitable progress hiding and command-scoped cancellation by root type. Compatibility: RFacade.AbortCommands&lt;TFacade&gt; is now internal. RFacade.AbortAllCommands remains public.</PackageReleaseNotes>
+    <PackageReleaseNotes>Adds optional facade-owned command locks and allows ordinary awaited children to run after cancellation with inherited abort state preserved. Review child-command cancellation checkpoints when upgrading. See https://github.com/seanstardev/RMVC/blob/v3.2.0/Release/3.2.0.md.</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/seanstardev/RMVC</RepositoryUrl>
     <RepositoryType>git</RepositoryType>

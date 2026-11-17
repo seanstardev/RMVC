@@ -258,15 +258,60 @@ Create command instances at the call site and use each instance once. Accept imm
 input through constructors; return typed results or publish model state. Do not expose
 command fields/properties for other code to inspect after asynchronous submission.
 
-RMVC records command errors in the root's error history. Check `ErrorOrAbort` before
-proceeding to dependent steps. Cancellation is cooperative: check
-`ThrowIfAbortRequested()` during long work and after a decision before changing state.
+Ordinary awaited children can enter `Run()` after cancellation, retaining the shared token and error history. This allows required cleanup to run before the child's own cancellation checkpoint. Child gate waits continue despite inherited cancellation; roots retain cancelled-entry checks and cancellable waits.
+
+Do not mechanically return at the start of every command when abort is set. Identify its required work and place checkpoints deliberately. Awaiting a child does not universally rethrow recorded failures: check `ErrorOrAbort` before dependent work or reporting success.
 
 > RMVC orchestrates application workflows, while developers own the thread safety
 > of models and actors. Its portability comes from preserving that separation.
 
 The counter uses atomic reads/increments for that reason. Real views own their UI
 thread; proxies and models own the concurrency requirements of their resources.
+
+## Optional coordination between commands
+
+Most applications do not need command locks. When several commands must coordinate access to related state, an application can register a meaningful gate.
+
+Place its empty type in the application's `Rmvc/Lock` folder:
+
+```csharp
+internal sealed class CataloguePublicationLock : IRCommandLock
+{
+}
+```
+
+Register it on the application facade:
+
+```csharp
+protected override IRCommandLock[] RegisterCommandLocks()
+    => [ new CataloguePublicationLock() ];
+```
+
+An application `CommandBase` can expose a named accessor:
+
+```csharp
+protected CataloguePublicationLock CataloguePublicationLock
+    => base.Lock<CataloguePublicationLock>();
+```
+
+Each participating command declares its own requirements:
+
+```csharp
+protected override IRCommandLock[] GetLocks()
+    => [ base.CataloguePublicationLock ];
+```
+
+These examples use C# collection expressions; older language versions can use equivalent array initialisers.
+
+RMVC acquires the requested gates before `Run()`. Awaited descendants reuse ancestor reservations, while each command remains responsible for declaring everything it needs. Reservations release after command exit handling.
+
+Registration is facade-local. Gates coordinate participating commands; they do not automatically protect every model or proxy method. Keep actor-local synchronization and validate inputs after waiting.
+
+Await children sequentially. Do not hold gates across human decisions or unnecessarily long operations. Progress callback commands and their descendants cannot declare locks.
+
+A detected circular wait produces an unhandled `RCommandLockCycleException`. There is no FIFO, starvation-prevention or maximum-wait guarantee.
+
+See the [3.2.0 release notes](Release/3.2.0.md) for details.
 
 ## Keep user journeys separate from running work
 
