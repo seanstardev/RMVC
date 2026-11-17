@@ -343,6 +343,9 @@ not a promise of effortless integration.
 
 ## Source and next steps
 
+See the [release notes](Release/README.md) for version-specific changes and
+compatibility information.
+
 The [core library](RMVC) is small enough to explore directly. Start with
 [`RCommandBase`](RMVC/RCommandBase.cs), [`RFacade`](RMVC/RFacade.cs) and
 [`RMediator`](RMVC/RMediator.cs). A good next exercise is replacing the console view
